@@ -1,4 +1,4 @@
-import { Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import { Animated, Pressable, StyleSheet, Text } from "react-native";
@@ -19,7 +19,7 @@ export default function SaveButton({ post, compact }: SaveButtonProps) {
   function handleSave() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.sequence([
-      Animated.spring(scale, { toValue: 1.3, useNativeDriver: true, speed: 50 }),
+      Animated.spring(scale, { toValue: 1.35, useNativeDriver: true, speed: 60 }),
       Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 30 }),
     ]).start();
     toggleSave(post.id);
@@ -27,11 +27,11 @@ export default function SaveButton({ post, compact }: SaveButtonProps) {
 
   if (compact) {
     return (
-      <Pressable onPress={handleSave} hitSlop={8}>
+      <Pressable onPress={handleSave} hitSlop={10}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          <Feather
-            name="bookmark"
-            size={15}
+          <Ionicons
+            name={post.savedByMe ? "bookmark" : "bookmark-outline"}
+            size={16}
             color={post.savedByMe ? colors.primary : colors.mutedForeground}
           />
         </Animated.View>
@@ -40,13 +40,12 @@ export default function SaveButton({ post, compact }: SaveButtonProps) {
   }
 
   return (
-    <Pressable onPress={handleSave} style={styles.row} hitSlop={6}>
+    <Pressable onPress={handleSave} style={styles.row} hitSlop={8}>
       <Animated.View style={{ transform: [{ scale }] }}>
-        <Feather
-          name={post.savedByMe ? "bookmark" : "bookmark"}
-          size={22}
+        <Ionicons
+          name={post.savedByMe ? "bookmark" : "bookmark-outline"}
+          size={24}
           color={post.savedByMe ? colors.primary : colors.foreground}
-          style={{ opacity: post.savedByMe ? 1 : 0.7 }}
         />
       </Animated.View>
       <Text style={[styles.count, { color: colors.mutedForeground }]}>

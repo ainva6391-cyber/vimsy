@@ -1,9 +1,7 @@
-import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,12 +17,10 @@ import { useColors } from "@/hooks/useColors";
 export default function DiscoverScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { posts, styleCategories, getFilteredPosts } = useApp();
+  const { styleCategories, getFilteredPosts } = useApp();
   const [activeStyle, setActiveStyle] = useState<string | undefined>(undefined);
 
   const filtered = getFilteredPosts(activeStyle, undefined);
-
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
   return (
@@ -40,9 +36,7 @@ export default function DiscoverScreen() {
         ]}
       >
         <Text style={[styles.logo, { color: colors.primary }]}>Whimsy</Text>
-        <Pressable onPress={() => router.push("/search")} hitSlop={8}>
-          <Feather name="search" size={22} color={colors.foreground} />
-        </Pressable>
+        <Ionicons name="sparkles-outline" size={22} color={colors.primary} />
       </View>
 
       <ScrollView
@@ -71,7 +65,7 @@ export default function DiscoverScreen() {
         style={styles.gridPad}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Feather name="image" size={40} color={colors.mutedForeground} />
+            <Ionicons name="image-outline" size={44} color={colors.mutedForeground} />
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
               No looks found for this style
             </Text>
@@ -83,9 +77,7 @@ export default function DiscoverScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
+  screen: { flex: 1 },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -107,9 +99,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 8,
   },
-  gridPad: {
-    paddingTop: 14,
-  },
+  gridPad: { paddingTop: 14 },
   empty: {
     flex: 1,
     alignItems: "center",

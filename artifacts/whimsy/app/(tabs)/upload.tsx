@@ -56,9 +56,10 @@ export default function UploadScreen() {
     if (!result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
       setImageUri(asset.uri);
-      if (asset.width && asset.height) {
-        setImageSize({ width: asset.width, height: asset.height });
-      }
+      // Some platforms may not provide dimensions — default to portrait 3:4
+      const w = asset.width && asset.width > 0 ? asset.width : 3;
+      const h = asset.height && asset.height > 0 ? asset.height : 4;
+      setImageSize({ width: w, height: h });
     }
   }
 
