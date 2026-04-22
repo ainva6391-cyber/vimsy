@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "Whimsy"
+version = "1.0.0"
+id = "artifacts/whimsy"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 25290
+
+[services.development]
+run = "pnpm --filter @workspace/whimsy run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/whimsy", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/whimsy", "run", "serve" ]
+
+[services.env]
+PORT = "25290"
+BASE_PATH = "/"

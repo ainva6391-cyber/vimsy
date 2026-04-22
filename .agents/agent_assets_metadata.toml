@@ -1,0 +1,26 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "gF9Q-_5Cp_LLVYHoOpX7f"
+uri = "file://artifacts/whimsy/assets/images/icon.png"
+type = "image"
+title = "whimsy app icon"
+
+[[generated]]
+id = "nBnLWEbogCeCoO2jBq8Zh"
+uri = "file://artifacts/whimsy/assets/images/outfit_placeholder_1.png"
+type = "image"
+title = "outfit flat lay 1"
+
+[[generated]]
+id = "lrt9WBlrgkHHUah-QaJfP"
+uri = "file://artifacts/whimsy/assets/images/outfit_placeholder_2.png"
+type = "image"
+title = "street style outfit 2"
+
+[[generated]]
+id = "y2PI6p2dw8oR86wNpTcPS"
+uri = "file://artifacts/whimsy/assets/images/outfit_placeholder_3.png"
+type = "image"
+title = "cozy fall outfit 3"
