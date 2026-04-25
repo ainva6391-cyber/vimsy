@@ -17,7 +17,6 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import UserAvatar from "@/components/UserAvatar";
-import StyleTag from "@/components/StyleTag";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -143,9 +142,22 @@ export default function PostDetailScreen() {
           {/* Caption */}
           <Text style={[styles.caption, { color: colors.foreground }]}>{post.caption}</Text>
 
-          {/* Style */}
+          {/* Style — tappable topic chip */}
           <View style={styles.styleRow}>
-            <StyleTag label={post.style} />
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push(`/topic/${encodeURIComponent(post.style)}`);
+              }}
+              style={({ pressed }) => [
+                styles.styleChip,
+                { backgroundColor: pressed ? colors.accent : colors.tag, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="pricetag-outline" size={13} color={colors.tagText} />
+              <Text style={[styles.styleChipText, { color: colors.tagText }]}>{post.style}</Text>
+              <Ionicons name="chevron-forward" size={13} color={colors.mutedForeground} />
+            </Pressable>
           </View>
 
           {/* Tags */}
@@ -331,6 +343,20 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   styleRow: { flexDirection: "row" },
+  styleChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingLeft: 12,
+    paddingRight: 10,
+    paddingVertical: 8,
+    borderRadius: 100,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  styleChipText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
   tagsRow: {
     flexDirection: "row",
     flexWrap: "wrap",

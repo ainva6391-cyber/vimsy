@@ -37,6 +37,10 @@ function RootLayoutNav() {
         name="board/[id]"
         options={{ headerShown: false, presentation: "card", animation: "slide_from_right" }}
       />
+      <Stack.Screen
+        name="topic/[slug]"
+        options={{ headerShown: false, presentation: "card", animation: "slide_from_right" }}
+      />
     </Stack>
   );
 }

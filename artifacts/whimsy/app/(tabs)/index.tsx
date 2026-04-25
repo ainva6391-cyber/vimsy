@@ -1,7 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import React, { useState } from "react";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
+import React, { useRef } from "react";
 import {
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,24 +13,22 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import MasonryGrid from "@/components/MasonryGrid";
-import StyleTag from "@/components/StyleTag";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function DiscoverScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { styleCategories, getFilteredPosts } = useApp();
-  const [activeStyle, setActiveStyle] = useState<string | undefined>(undefined);
-
-  const filtered = getFilteredPosts(activeStyle, undefined);
+  const router = useRouter();
+  const { styleCategories, posts } = useApp();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
-  return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+  const header = (
+    <>
+      {/* ── App bar ── */}
       <View
         style={[
-          styles.header,
+          styles.appBar,
           {
             paddingTop: topPad + 10,
             backgroundColor: colors.background,
@@ -39,35 +40,57 @@ export default function DiscoverScreen() {
         <Ionicons name="sparkles-outline" size={22} color={colors.primary} />
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterRow}
-        style={[styles.filterScroll, { borderBottomColor: colors.border }]}
-      >
-        <StyleTag
-          label="All"
-          selected={!activeStyle}
-          onPress={() => setActiveStyle(undefined)}
-        />
-        {styleCategories.map((s) => (
-          <StyleTag
-            key={s}
-            label={s}
-            selected={activeStyle === s}
-            onPress={() => setActiveStyle(activeStyle === s ? undefined : s)}
-          />
-        ))}
-      </ScrollView>
+      {/* ── Section label ── */}
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+          Browse by Topic
+        </Text>
+        <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
+          Tap any style to explore
+        </Text>
+      </View>
 
+      {/* ── Topic chips — all visible, wrapped ── */}
+      <View style={styles.topicGrid}>
+        {styleCategories.map((style) => {
+          const count = posts.filter((p) => p.style === style).length;
+          return (
+            <TopicChip
+              key={style}
+              label={style}
+              count={count}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                router.push(`/topic/${encodeURIComponent(style)}`);
+              }}
+            />
+          );
+        })}
+      </View>
+
+      {/* ── Divider + "All looks" label ── */}
+      <View style={[styles.allLooksHeader, { borderTopColor: colors.border }]}>
+        <Text style={[styles.allLooksTitle, { color: colors.foreground }]}>
+          All Looks
+        </Text>
+        <Text style={[styles.allLooksCount, { color: colors.mutedForeground }]}>
+          {posts.length} posts
+        </Text>
+      </View>
+    </>
+  );
+
+  return (
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <MasonryGrid
-        posts={filtered}
+        posts={posts}
+        ListHeaderComponent={header}
         style={styles.gridPad}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="image-outline" size={44} color={colors.mutedForeground} />
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              No looks found for this style
+              No looks yet
             </Text>
           </View>
         }
@@ -76,9 +99,41 @@ export default function DiscoverScreen() {
   );
 }
 
+// ── Topic chip component ────────────────────────────────────────────────────
+function TopicChip({
+  label,
+  count,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  onPress: () => void;
+}) {
+  const colors = useColors();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.chip,
+        {
+          backgroundColor: pressed ? colors.accent : colors.tag,
+          borderColor: colors.border,
+        },
+      ]}
+    >
+      <Text style={[styles.chipLabel, { color: colors.tagText }]}>{label}</Text>
+      <View style={[styles.chipBadge, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.chipCount, { color: colors.primaryForeground }]}>
+          {count}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: {
+  appBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -91,15 +146,72 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
     letterSpacing: -0.5,
   },
-  filterScroll: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
+  sectionHeader: {
+    paddingHorizontal: 18,
+    paddingTop: 20,
+    paddingBottom: 14,
+    gap: 3,
   },
-  filterRow: {
+  sectionTitle: {
+    fontSize: 18,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.3,
+  },
+  sectionSub: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  topicGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
+    gap: 10,
+    paddingBottom: 18,
   },
-  gridPad: { paddingTop: 14 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingLeft: 14,
+    paddingRight: 8,
+    paddingVertical: 9,
+    borderRadius: 100,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  chipBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+  },
+  chipCount: {
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
+  },
+  allLooksHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  allLooksTitle: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  allLooksCount: {
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  gridPad: { paddingTop: 6 },
   empty: {
     flex: 1,
     alignItems: "center",
