@@ -26,6 +26,40 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
 
+## Database Schema (`lib/db/src/schema/`)
+
+All tables use UUID primary keys (`gen_random_uuid()`). Foreign keys use `user_id` referencing `auth_users.id`.
+
+| Table | Purpose | Key columns |
+|---|---|---|
+| `auth_users` | Sensitive Clerk auth data synced on sign-up | `clerk_user_id`, `email` |
+| `users` | Public profile data (no email/password) | `user_id` → auth_users, `username`, `display_name`, `avatar_url`, `bio`, `style_tags` |
+| `posts` | User-created outfit posts | `user_id` → auth_users, `image_url`, `caption`, `style`, `tags`, `like_count`, `save_count`, `comment_count` |
+| `comments` | Comments on posts | `post_id` → posts, `user_id` → auth_users, `content` |
+| `likes` | Post likes (unique per user+post) | `post_id` → posts, `user_id` → auth_users |
+| `saves` | Post saves (unique per user+post) | `post_id` → posts, `user_id` → auth_users |
+
+All counter columns (`like_count`, `save_count`, `comment_count`, `post_count`) are kept in sync via API route handlers using `sql` template expressions.
+
+## API Routes (`artifacts/api-server/src/routes/`)
+
+| Route | Auth | Description |
+|---|---|---|
+| `POST /api/auth/sync` | Required | Sync Clerk user → `auth_users` + `users` tables on sign-up |
+| `GET /api/auth/me` | Required | Resolve Clerk JWT to internal IDs |
+| `POST /api/posts` | Required | Create a post |
+| `GET /api/posts` | Public | List posts (optional `?style=` filter) |
+| `GET /api/posts/:id` | Public | Get single post |
+| `DELETE /api/posts/:id` | Required (own) | Delete a post |
+| `POST /api/posts/:postId/comments` | Required | Add a comment |
+| `GET /api/posts/:postId/comments` | Public | List comments for a post |
+| `DELETE /api/comments/:id` | Required (own) | Delete a comment |
+| `POST /api/posts/:postId/likes` | Required | Like a post (idempotent) |
+| `DELETE /api/posts/:postId/likes` | Required | Unlike a post |
+| `POST /api/posts/:postId/saves` | Required | Save a post (idempotent) |
+| `DELETE /api/posts/:postId/saves` | Required | Unsave a post |
+| `GET /api/saves` | Required | List current user's saved posts |
+
 ## Artifacts
 
 ### Whimsy (Mobile App)
