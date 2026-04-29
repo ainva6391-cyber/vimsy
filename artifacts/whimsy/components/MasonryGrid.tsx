@@ -1,7 +1,9 @@
+import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import React, { useMemo } from "react";
 import {
+  Alert,
   Dimensions,
   Platform,
   Pressable,
@@ -26,6 +28,8 @@ interface MasonryGridProps {
   ListHeaderComponent?: React.ReactElement;
   ListEmptyComponent?: React.ReactElement;
   style?: object;
+  /** When provided, a ⋯ menu appears on each card with a Delete option. */
+  onDelete?: (postId: string) => void;
 }
 
 export default function MasonryGrid({
@@ -33,6 +37,7 @@ export default function MasonryGrid({
   ListHeaderComponent,
   ListEmptyComponent,
   style,
+  onDelete,
 }: MasonryGridProps) {
   const colors = useColors();
   const router = useRouter();
@@ -43,6 +48,30 @@ export default function MasonryGrid({
     posts.forEach((p, i) => (i % 2 === 0 ? left.push(p) : right.push(p)));
     return { leftCol: left, rightCol: right };
   }, [posts]);
+
+  function handleMenuPress(post: Post) {
+    Alert.alert(post.caption ? `"${post.caption}"` : "This look", undefined, [
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          Alert.alert(
+            "Delete look?",
+            "This will permanently remove the post. This cannot be undone.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete",
+                style: "destructive",
+                onPress: () => onDelete?.(post.id),
+              },
+            ],
+          );
+        },
+      },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
 
   function renderPost(post: Post) {
     const imgHeight = COLUMN_WIDTH / post.aspectRatio;
@@ -58,6 +87,18 @@ export default function MasonryGrid({
           contentFit="cover"
           transition={300}
         />
+
+        {/* Three-dot menu — only rendered when onDelete is provided */}
+        {onDelete && (
+          <Pressable
+            style={[styles.menuBtn, { backgroundColor: colors.background + "CC" }]}
+            onPress={() => handleMenuPress(post)}
+            hitSlop={8}
+          >
+            <Ionicons name="ellipsis-horizontal" size={14} color={colors.foreground} />
+          </Pressable>
+        )}
+
         <View style={styles.cardFooter}>
           <Text style={[styles.caption, { color: colors.foreground }]} numberOfLines={2}>
             {post.caption}
@@ -120,6 +161,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: "hidden",
     borderWidth: StyleSheet.hairlineWidth,
+  },
+  menuBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
   },
   cardFooter: {
     padding: 10,

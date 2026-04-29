@@ -100,3 +100,7 @@ export function savePost(postId: string, token: string) {
 export function unsavePost(postId: string, token: string) {
   return apiFetch(`/posts/${postId}/saves`, "DELETE", undefined, token);
 }
+
+export function deletePost(postId: string, token: string) {
+  return apiFetch(`/posts/${postId}`, "DELETE", undefined, token);
+}

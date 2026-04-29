@@ -238,6 +238,7 @@ interface AppContextType {
   toggleSave: (postId: string) => void;
   toggleLike: (postId: string) => void;
   addPost: (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">) => string;
+  removePost: (postId: string) => void;
   addComment: (postId: string, comment: Omit<Comment, "id" | "createdAt">) => void;
   createBoard: (name: string, firstPostId?: string) => string;
   addToBoard: (postId: string, boardId: string) => void;
@@ -357,6 +358,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return newId;
     },
     [persistUserPosts]
+  );
+
+  // ── Remove post ───────────────────────────────────────────────────────────
+  const removePost = useCallback(
+    (postId: string) => {
+      setPosts((prev) => {
+        const updated = prev.filter((p) => p.id !== postId);
+        persistUserPosts(updated);
+        return updated;
+      });
+    },
+    [persistUserPosts],
   );
 
   // ── Add comment ───────────────────────────────────────────────────────────
@@ -521,6 +534,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         toggleSave,
         toggleLike,
         addPost,
+        removePost,
         addComment,
         createBoard,
         addToBoard,

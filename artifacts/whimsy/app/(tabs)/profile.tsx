@@ -18,6 +18,7 @@ import UserAvatar from "@/components/UserAvatar";
 import { useApp } from "@/contexts/AppContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
+import { deletePost } from "@/lib/apiClient";
 import {
   supabase,
   uploadProfileImage,
@@ -70,8 +71,8 @@ function SignedOutProfile() {
 function SignedInProfile() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, signOut, refreshUser } = useAuth();
-  const { myPosts } = useApp();
+  const { user, session, signOut, refreshUser } = useAuth();
+  const { myPosts, removePost } = useApp();
   const topPad = insets.top;
 
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -84,6 +85,16 @@ function SignedInProfile() {
       { text: "Cancel", style: "cancel" },
       { text: "Sign Out", style: "destructive", onPress: () => signOut() },
     ]);
+  }
+
+  async function handleDeletePost(postId: string) {
+    removePost(postId);
+    try {
+      const token = session?.access_token;
+      if (token) await deletePost(postId, token);
+    } catch {
+      // Silently ignore — local removal already happened.
+    }
   }
 
   async function pickAndUploadAvatar() {
@@ -211,6 +222,7 @@ function SignedInProfile() {
         posts={myPosts}
         ListHeaderComponent={header}
         style={styles.gridPad}
+        onDelete={handleDeletePost}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="camera-outline" size={44} color={colors.mutedForeground} />
