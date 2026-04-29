@@ -1,12 +1,12 @@
 /**
  * POST /api/auth/sync
  *
- * Called from the mobile app immediately after a successful Clerk sign-up.
- * Inserts a row into auth_users (sensitive data) and a row into users (profile).
- * Uses ON CONFLICT DO NOTHING so it's safe to call multiple times.
+ * Called from the mobile app after a successful Supabase sign-in/sign-up.
+ * Inserts a row into auth_users and a row into users (profile).
+ * Uses ON CONFLICT DO UPDATE so it is safe to call multiple times.
  */
 import { Router } from "express";
-import { requireAuth } from "@clerk/express";
+import { requireAuth } from "../middlewares/supabaseAuthMiddleware";
 import { db, authUsersTable, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,32 +14,32 @@ import { z } from "zod";
 const router = Router();
 
 const syncBodySchema = z.object({
-  clerkUserId: z.string().min(1),
-  email:       z.string().email(),
-  username:    z.string().min(1).max(50),
-  displayName: z.string().max(100).optional(),
-  avatarUrl:   z.string().url().optional(),
+  supabaseUserId: z.string().min(1),
+  email:          z.string().email(),
+  username:       z.string().min(1).max(50),
+  displayName:    z.string().max(100).optional(),
+  avatarUrl:      z.string().url().optional(),
 });
 
-router.post("/auth/sync", requireAuth(), async (req, res) => {
+router.post("/auth/sync", requireAuth, async (req, res) => {
   const parse = syncBodySchema.safeParse(req.body);
   if (!parse.success) {
     return res.status(400).json({ error: "Invalid request body", details: parse.error.flatten() });
   }
 
-  const { clerkUserId, email, username, displayName, avatarUrl } = parse.data;
+  const { supabaseUserId, email, username, displayName, avatarUrl } = parse.data;
 
-  // 1️⃣  Upsert into auth_users (sensitive auth data only)
+  // Upsert into auth_users
   const [authUser] = await db
     .insert(authUsersTable)
-    .values({ clerkUserId, email })
+    .values({ supabaseUserId, email })
     .onConflictDoUpdate({
-      target: authUsersTable.clerkUserId,
+      target: authUsersTable.supabaseUserId,
       set: { email, updatedAt: new Date() },
     })
     .returning();
 
-  // 2️⃣  Upsert into users (public profile, no email/password)
+  // Upsert into users (public profile)
   const [user] = await db
     .insert(usersTable)
     .values({
@@ -62,13 +62,11 @@ router.post("/auth/sync", requireAuth(), async (req, res) => {
   return res.status(200).json({ authUserId: authUser.id, userId: user.id });
 });
 
-/** GET /api/auth/me — resolve Clerk user to internal IDs */
-router.get("/auth/me", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
+router.get("/auth/me", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
   const authUser = await db.query.authUsersTable.findFirst({
-    where: eq(authUsersTable.clerkUserId, clerkUserId),
+    where: eq(authUsersTable.supabaseUserId, supabaseUserId),
   });
 
   if (!authUser) return res.status(404).json({ error: "User not synced yet" });

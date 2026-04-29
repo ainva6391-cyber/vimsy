@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth, useUser } from "@clerk/expo";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -17,8 +16,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MasonryGrid from "@/components/MasonryGrid";
 import UserAvatar from "@/components/UserAvatar";
 import { useApp } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
+  supabase,
   uploadProfileImage,
   UploadValidationError,
   UploadStorageError,
@@ -69,8 +70,7 @@ function SignedOutProfile() {
 function SignedInProfile() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { signOut } = useAuth();
-  const { user } = useUser();
+  const { user, signOut } = useAuth();
   const { myPosts } = useApp();
   const topPad = insets.top;
 
@@ -104,17 +104,14 @@ function SignedInProfile() {
 
     try {
       // Step 1: Upload to Supabase Storage (validates type/size, returns public URL)
-      await uploadProfileImage(localUri, user!.id);
+      const { publicUrl } = await uploadProfileImage(localUri, user!.id);
 
-      // Step 2: Also update Clerk's managed profile image so imageUrl stays fresh
-      // This is best-effort — if it fails, the Supabase copy is still stored
-      try {
-        const blob = await fetchBlob(localUri);
-        await user!.setProfileImage({ file: blob });
-        await user!.reload();
-      } catch (clerkErr) {
-        // Clerk update failed — avatar is in Supabase but Clerk imageUrl won't update
-        console.warn("[Profile] Clerk profile image update failed:", clerkErr);
+      // Step 2: Store the public URL in Supabase user metadata so it persists across sessions
+      const { error: updateErr } = await supabase.auth.updateUser({
+        data: { avatar_url: publicUrl },
+      });
+      if (updateErr) {
+        console.warn("[Profile] Supabase updateUser failed:", updateErr.message);
       }
     } catch (err) {
       if (err instanceof UploadValidationError) {
@@ -130,16 +127,17 @@ function SignedInProfile() {
     }
   }
 
+  const meta = user?.user_metadata ?? {};
   const displayName =
-    user?.fullName ||
-    user?.username ||
-    user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
+    (meta.name as string) ||
+    (meta.username as string) ||
+    user?.email?.split("@")[0] ||
     "Whimsy User";
   const username =
-    user?.username ||
-    user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
+    (meta.username as string) ||
+    user?.email?.split("@")[0] ||
     "whimsy.user";
-  const avatarUri = user?.imageUrl ?? null;
+  const avatarUri = (meta.avatar_url as string) ?? null;
 
   const header = (
     <View style={[styles.profileHeader, { paddingTop: topPad + 10 }]}>
@@ -205,15 +203,8 @@ function SignedInProfile() {
 }
 
 export default function ProfileScreen() {
-  const { isSignedIn } = useAuth();
-  return isSignedIn ? <SignedInProfile /> : <SignedOutProfile />;
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function fetchBlob(uri: string): Promise<Blob> {
-  const response = await fetch(uri);
-  return response.blob();
+  const { user } = useAuth();
+  return user ? <SignedInProfile /> : <SignedOutProfile />;
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────

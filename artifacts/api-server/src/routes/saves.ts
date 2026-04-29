@@ -6,26 +6,23 @@
  * GET    /api/saves                — list current user's saved posts
  */
 import { Router } from "express";
-import { requireAuth } from "@clerk/express";
+import { requireAuth } from "../middlewares/supabaseAuthMiddleware";
 import { db, authUsersTable, savesTable, postsTable } from "@workspace/db";
 import { eq, and, sql, desc } from "drizzle-orm";
 
 const router = Router();
 
-async function resolveAuthUserId(clerkUserId: string) {
+async function resolveAuthUserId(supabaseUserId: string) {
   const authUser = await db.query.authUsersTable.findFirst({
-    where: eq(authUsersTable.clerkUserId, clerkUserId),
+    where: eq(authUsersTable.supabaseUserId, supabaseUserId),
   });
   return authUser ?? null;
 }
 
-// ── save a post ────────────────────────────────────────────────────────────
+router.post("/posts/:postId/saves", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.post("/posts/:postId/saves", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not synced" });
 
   const post = await db.query.postsTable.findFirst({
@@ -49,13 +46,10 @@ router.post("/posts/:postId/saves", requireAuth(), async (req, res) => {
   return res.status(200).json({ saved: true, saveId: save?.id ?? null });
 });
 
-// ── unsave a post ──────────────────────────────────────────────────────────
+router.delete("/posts/:postId/saves", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.delete("/posts/:postId/saves", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const [deleted] = await db
@@ -73,13 +67,10 @@ router.delete("/posts/:postId/saves", requireAuth(), async (req, res) => {
   return res.status(200).json({ saved: false });
 });
 
-// ── list saved posts for current user ─────────────────────────────────────
+router.get("/saves", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.get("/saves", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const saves = await db.query.savesTable.findMany({

@@ -1,11 +1,14 @@
-import { useAuth } from "@clerk/expo";
 import { Redirect, Stack } from "expo-router";
 import React from "react";
 
-export default function AuthLayout() {
-  const { isSignedIn } = useAuth();
+import { useAuth } from "@/contexts/AuthContext";
 
-  if (isSignedIn) {
+export default function AuthLayout() {
+  const { user, loading } = useAuth();
+
+  if (loading) return null;
+
+  if (user) {
     return <Redirect href="/(tabs)" />;
   }
 

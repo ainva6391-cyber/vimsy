@@ -1,12 +1,16 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { type User } from "@supabase/supabase-js";
 import React, {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
+
+import { supabase } from "@/lib/supabase";
 
 // imageUri/coverUri: supports both URI strings and require() module references
 export interface Post {
@@ -206,16 +210,23 @@ const SAMPLE_POSTS: Post[] = [
   },
 ];
 
-const CURRENT_USER: UserProfile = {
-  id: "me",
-  username: "whimsy.user",
-  displayName: "Your Style",
-  avatar: "https://i.pravatar.cc/150?img=55",
-  bio: "Fashion lover. Collecting looks I adore.",
-  followers: 214,
-  following: 87,
-  postCount: 0,
-};
+function userProfileFromSupabase(authUser: User | null): UserProfile {
+  if (!authUser) {
+    return { id: "guest", username: "guest", displayName: "Guest", avatar: "", bio: "", followers: 0, following: 0, postCount: 0 };
+  }
+  const meta = authUser.user_metadata ?? {};
+  const email = authUser.email ?? "";
+  return {
+    id: authUser.id,
+    username: (meta.username as string) || email.split("@")[0],
+    displayName: (meta.name as string) || (meta.username as string) || email.split("@")[0],
+    avatar: (meta.avatar_url as string) || "",
+    bio: "",
+    followers: 0,
+    following: 0,
+    postCount: 0,
+  };
+}
 
 interface AppContextType {
   posts: Post[];
@@ -245,7 +256,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [posts, setPosts] = useState<Post[]>(SAMPLE_POSTS);
   const [boards, setBoards] = useState<Board[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [currentUser] = useState<UserProfile>(CURRENT_USER);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAuthUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const currentUser = useMemo(() => userProfileFromSupabase(authUser), [authUser]);
 
   const postsRef = useRef<Post[]>(SAMPLE_POSTS);
   useEffect(() => { postsRef.current = posts; }, [posts]);

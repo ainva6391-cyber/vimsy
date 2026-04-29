@@ -35,7 +35,7 @@ async function apiFetch<T = unknown>(
 // ── Auth ────────────────────────────────────────────────────────────────────
 
 export function syncUser(
-  payload: { clerkUserId: string; email: string; username: string; displayName?: string; avatarUrl?: string },
+  payload: { supabaseUserId: string; email: string; username: string; displayName?: string; avatarUrl?: string },
   token: string,
 ) {
   return apiFetch("/auth/sync", "POST", payload, token);

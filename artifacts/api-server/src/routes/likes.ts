@@ -5,26 +5,23 @@
  * DELETE /api/posts/:postId/likes  — unlike a post
  */
 import { Router } from "express";
-import { requireAuth } from "@clerk/express";
+import { requireAuth } from "../middlewares/supabaseAuthMiddleware";
 import { db, authUsersTable, likesTable, postsTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 
 const router = Router();
 
-async function resolveAuthUserId(clerkUserId: string) {
+async function resolveAuthUserId(supabaseUserId: string) {
   const authUser = await db.query.authUsersTable.findFirst({
-    where: eq(authUsersTable.clerkUserId, clerkUserId),
+    where: eq(authUsersTable.supabaseUserId, supabaseUserId),
   });
   return authUser ?? null;
 }
 
-// ── like ───────────────────────────────────────────────────────────────────
+router.post("/posts/:postId/likes", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.post("/posts/:postId/likes", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not synced" });
 
   const post = await db.query.postsTable.findFirst({
@@ -48,13 +45,10 @@ router.post("/posts/:postId/likes", requireAuth(), async (req, res) => {
   return res.status(200).json({ liked: true, likeId: like?.id ?? null });
 });
 
-// ── unlike ─────────────────────────────────────────────────────────────────
+router.delete("/posts/:postId/likes", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.delete("/posts/:postId/likes", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const [deleted] = await db

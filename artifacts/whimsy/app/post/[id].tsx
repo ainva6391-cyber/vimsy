@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth, useUser } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -21,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import UserAvatar from "@/components/UserAvatar";
 import { useApp, type Comment } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import {
   likePost,
@@ -47,8 +47,8 @@ export default function PostDetailScreen() {
     getComments,
     currentUser,
   } = useApp();
-  const { getToken, isSignedIn } = useAuth();
-  const { user } = useUser();
+  const { session, user } = useAuth();
+  const isSignedIn = !!user;
 
   const post = getPostById(id ?? "");
 
@@ -101,7 +101,7 @@ export default function PostDetailScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     toggleLike(post.id);
     try {
-      const token = await getToken();
+      const token = session?.access_token;
       if (token) {
         if (!post.likedByMe) await likePost(post.id, token);
         else await unlikePost(post.id, token);
@@ -126,17 +126,18 @@ export default function PostDetailScreen() {
     setSubmittingComment(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
+    const meta = user?.user_metadata ?? {};
     addComment(post.id, {
       postId: post.id,
       userId: currentUser.id,
-      username: user?.username ?? currentUser.username,
-      userAvatar: user?.imageUrl ?? currentUser.avatar,
+      username: (meta.username as string) ?? currentUser.username,
+      userAvatar: (meta.avatar_url as string) ?? currentUser.avatar,
       content: text,
     });
     setCommentText("");
 
     try {
-      const token = await getToken();
+      const token = session?.access_token;
       if (token) await apiAddComment(post.id, text, token);
     } catch {}
 
@@ -411,7 +412,7 @@ export default function PostDetailScreen() {
             ]}
           >
             <UserAvatar
-              uri={isSignedIn ? (user?.imageUrl ?? currentUser.avatar) : currentUser.avatar}
+              uri={isSignedIn ? ((user?.user_metadata?.avatar_url as string) ?? currentUser.avatar) : currentUser.avatar}
               size={34}
             />
             <TextInput

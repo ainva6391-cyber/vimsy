@@ -1,5 +1,4 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import { useAuth, useUser } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
@@ -18,6 +17,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/contexts/AppContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
 import { createPost } from "@/lib/apiClient";
 import { uploadPostImage, UploadValidationError, UploadStorageError } from "@/lib/supabase";
@@ -33,8 +33,7 @@ export default function UploadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { addPost, currentUser } = useApp();
-  const { getToken } = useAuth();
-  const { user } = useUser();
+  const { session, user } = useAuth();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState({ width: 3, height: 4 });
@@ -116,14 +115,15 @@ export default function UploadScreen() {
 
     // 2. Add to local state immediately with the public URL
     setUploadStatus("saving");
+    const meta = user?.user_metadata ?? {};
     addPost({
       imageUri: finalImageUri,
       caption: caption.trim(),
       tags,
       style: selectedTopic,
       userId: currentUser.id,
-      username: user?.username ?? currentUser.username,
-      userAvatar: user?.imageUrl ?? currentUser.avatar,
+      username: (meta.username as string) ?? currentUser.username,
+      userAvatar: (meta.avatar_url as string) ?? currentUser.avatar,
       width: imageSize.width,
       height: imageSize.height,
       aspectRatio: imageSize.width / imageSize.height,
@@ -131,7 +131,7 @@ export default function UploadScreen() {
 
     // 3. Persist to DB with the Supabase URL (fire-and-forget)
     try {
-      const token = await getToken();
+      const token = session?.access_token;
       if (token) {
         await createPost(
           {

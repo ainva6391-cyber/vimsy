@@ -32,7 +32,7 @@ All tables use UUID primary keys (`gen_random_uuid()`). Foreign keys use `user_i
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `auth_users` | Sensitive Clerk auth data synced on sign-up | `clerk_user_id`, `email` |
+| `auth_users` | Supabase auth data synced on sign-up | `supabase_user_id`, `email` |
 | `users` | Public profile data (no email/password) | `user_id` → auth_users, `username`, `display_name`, `avatar_url`, `bio`, `style_tags` |
 | `posts` | User-created outfit posts | `user_id` → auth_users, `image_url`, `caption`, `style`, `tags`, `like_count`, `save_count`, `comment_count` |
 | `comments` | Comments on posts | `post_id` → posts, `user_id` → auth_users, `content` |
@@ -45,8 +45,8 @@ All counter columns (`like_count`, `save_count`, `comment_count`, `post_count`) 
 
 | Route | Auth | Description |
 |---|---|---|
-| `POST /api/auth/sync` | Required | Sync Clerk user → `auth_users` + `users` tables on sign-up |
-| `GET /api/auth/me` | Required | Resolve Clerk JWT to internal IDs |
+| `POST /api/auth/sync` | Required | Sync Supabase user → `auth_users` + `users` tables on sign-up |
+| `GET /api/auth/me` | Required | Resolve Supabase JWT to internal IDs |
 | `POST /api/posts` | Required | Create a post |
 | `GET /api/posts` | Public | List posts (optional `?style=` filter) |
 | `GET /api/posts/:id` | Public | Get single post |
@@ -75,25 +75,26 @@ All counter columns (`like_count`, `save_count`, `comment_count`, `post_count`) 
 - Save posts to collections/boards with board create flow
 - Post detail view with tag display, save counts, board saving modal
 - Board detail view with post grid and delete board action
-- User profile with Clerk user data (avatar, display name, email)
+- User profile with Supabase user data (avatar, display name, email from user_metadata)
 - Sign out from profile screen
 - Sign In / Sign Up screens for unauthenticated users
 - Dark mode support
 - AsyncStorage for local persistence
 
-#### Auth System (Clerk)
-- Provider: Replit-managed Clerk (`@clerk/expo`)
+#### Auth System (Supabase)
+- Provider: Supabase Auth (`@supabase/supabase-js`) with email/password
+- Auth context: `contexts/AuthContext.tsx` — provides `user`, `session`, `signIn`, `signUp`, `signOut`
 - Auth routes: `app/(auth)/sign-in.tsx`, `app/(auth)/sign-up.tsx`
 - Auth group layout: `app/(auth)/_layout.tsx` — redirects signed-in users to tabs
-- Email + password flow with email verification code
+- Sign-up collects Full Name, Username, Email, Password stored in `user_metadata`
 - Discover tab is public (visible without auth)
 - Profile tab shows sign-in / sign-up prompt for unauthenticated users
-- Clerk keys forwarded via `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` env var in dev and build scripts
-- API server wired with Clerk proxy middleware (`/__clerk`) and `clerkMiddleware()`
-- Metro `blockList` excludes `@wallet-standard` temp dirs (Clerk's Solana peer dep)
+- Supabase keys forwarded via `EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- API server uses `supabaseAuthMiddleware` — validates Bearer tokens via `supabase.auth.getUser()`
+- Session persisted with AsyncStorage (`persistSession: true`, `autoRefreshToken: true`)
 
 #### Key Files
-- `app/_layout.tsx` — Root layout with ClerkProvider + ClerkLoaded wrapping all providers
+- `app/_layout.tsx` — Root layout with AuthProvider (Supabase) wrapping all providers
 - `app/(tabs)/_layout.tsx` — 5-tab navigation (Discover, Explore, Share, Collections, Profile)
 - `app/(auth)/_layout.tsx` — Auth group; redirects signed-in users
 - `app/(auth)/sign-in.tsx` — Sign in screen (email/password + MFA verify)
@@ -108,13 +109,10 @@ All counter columns (`like_count`, `save_count`, `comment_count`, `post_count`) 
 - `metro.config.js` — Extends default config with wallet-standard blockList
 
 #### Dependencies Added
-- `@clerk/expo` — Expo Clerk auth SDK
-- `@clerk/express` — Server-side Clerk middleware
+- `@supabase/supabase-js` — Supabase client (auth + storage) for both Expo app and API server
 - `expo-auth-session` — OAuth session handling
-- `expo-secure-store` — Secure token storage for Clerk
-- `expo-crypto` — Crypto primitives for Clerk
+- `expo-crypto` — Crypto primitives (Supabase PKCE)
 - `expo-web-browser` — OAuth browser flow
-- `@react-native-async-storage/async-storage` — local persistence
+- `@react-native-async-storage/async-storage` — session persistence
 - `expo-image-picker` — device photo access
 - `expo-image` — optimized image component
-- `http-proxy-middleware` — Clerk proxy on API server

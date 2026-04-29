@@ -7,23 +7,19 @@
  * DELETE /api/posts/:id        — delete own post
  */
 import { Router } from "express";
-import { requireAuth } from "@clerk/express";
+import { requireAuth } from "../middlewares/supabaseAuthMiddleware";
 import { db, authUsersTable, postsTable, usersTable } from "@workspace/db";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { z } from "zod";
 
 const router = Router();
 
-// ── helpers ────────────────────────────────────────────────────────────────
-
-async function resolveAuthUserId(clerkUserId: string) {
+async function resolveAuthUserId(supabaseUserId: string) {
   const authUser = await db.query.authUsersTable.findFirst({
-    where: eq(authUsersTable.clerkUserId, clerkUserId),
+    where: eq(authUsersTable.supabaseUserId, supabaseUserId),
   });
   return authUser ?? null;
 }
-
-// ── create post ────────────────────────────────────────────────────────────
 
 const createPostSchema = z.object({
   imageUrl: z.string().url(),
@@ -32,16 +28,15 @@ const createPostSchema = z.object({
   tags:     z.array(z.string().max(50)).max(20).optional(),
 });
 
-router.post("/posts", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
+router.post("/posts", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
   const parse = createPostSchema.safeParse(req.body);
   if (!parse.success) {
     return res.status(400).json({ error: "Invalid body", details: parse.error.flatten() });
   }
 
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not synced. Call /api/auth/sync first." });
 
   const { imageUrl, caption, style, tags } = parse.data;
@@ -51,7 +46,6 @@ router.post("/posts", requireAuth(), async (req, res) => {
     .values({ userId: authUser.id, imageUrl, caption, style, tags })
     .returning();
 
-  // bump post count on profile
   await db
     .update(usersTable)
     .set({ postCount: sql`${usersTable.postCount} + 1` })
@@ -59,8 +53,6 @@ router.post("/posts", requireAuth(), async (req, res) => {
 
   return res.status(201).json(post);
 });
-
-// ── list posts ─────────────────────────────────────────────────────────────
 
 router.get("/posts", async (req, res) => {
   const style = typeof req.query.style === "string" ? req.query.style : undefined;
@@ -74,8 +66,6 @@ router.get("/posts", async (req, res) => {
   return res.status(200).json(posts);
 });
 
-// ── get single post ────────────────────────────────────────────────────────
-
 router.get("/posts/:id", async (req, res) => {
   const post = await db.query.postsTable.findFirst({
     where: eq(postsTable.id, req.params.id),
@@ -85,13 +75,10 @@ router.get("/posts/:id", async (req, res) => {
   return res.status(200).json(post);
 });
 
-// ── delete post ────────────────────────────────────────────────────────────
+router.delete("/posts/:id", requireAuth, async (req, res) => {
+  const supabaseUserId = req.supabaseUserId!;
 
-router.delete("/posts/:id", requireAuth(), async (req, res) => {
-  const clerkUserId = req.auth.userId;
-  if (!clerkUserId) return res.status(401).json({ error: "Unauthenticated" });
-
-  const authUser = await resolveAuthUserId(clerkUserId);
+  const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const [deleted] = await db
