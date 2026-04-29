@@ -65,11 +65,17 @@ export default function SignUpScreen() {
           <View style={[styles.verifyIcon, { backgroundColor: colors.tag }]}>
             <Ionicons name="mail-outline" size={34} color={colors.primary} />
           </View>
-          <Text style={[styles.heading, { color: colors.foreground, textAlign: "center" }]}>Check your email</Text>
+          <Text style={[styles.heading, { color: colors.foreground, textAlign: "center" }]}>
+            One more step
+          </Text>
           <Text style={[styles.subheading, { color: colors.mutedForeground, textAlign: "center" }]}>
-            We sent a confirmation link to{"\n"}
+            A confirmation email was sent to{"\n"}
             <Text style={{ fontFamily: "Inter_600SemiBold", color: colors.foreground }}>{email}</Text>
-            {"\n\n"}Click the link to activate your account, then come back to sign in.
+            {"\n\n"}Click the link to activate your account, then sign in below.{"\n\n"}
+            <Text style={{ fontFamily: "Inter_400Regular", fontSize: 13 }}>
+              To skip this step entirely, go to your Supabase dashboard → Authentication → Providers → Email and turn off{" "}
+              <Text style={{ fontFamily: "Inter_600SemiBold" }}>Confirm email</Text>.
+            </Text>
           </Text>
           <Pressable
             onPress={() => router.replace("/(auth)/sign-in")}

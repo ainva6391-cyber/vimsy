@@ -61,8 +61,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (error) return { error: friendlyAuthError(error.message), needsEmailConfirmation: false };
 
-    const needsEmailConfirmation = !data.session;
-    return { error: null, needsEmailConfirmation };
+    // If Supabase returned a session directly (email confirmation disabled) we're done.
+    if (data.session) return { error: null, needsEmailConfirmation: false };
+
+    // Email confirmation is still enabled in the Supabase project settings.
+    // Try signing in immediately — this succeeds only if the project has
+    // confirmation disabled but the signUp call happened to return null session
+    // for another reason (rare). If it fails with "not confirmed", surface the
+    // confirmation screen so the user knows what to do.
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (!signInErr) return { error: null, needsEmailConfirmation: false };
+
+    // "Email not confirmed" means Supabase still requires confirmation.
+    if (signInErr.message.toLowerCase().includes("not confirmed") ||
+        signInErr.message.toLowerCase().includes("email")) {
+      return { error: null, needsEmailConfirmation: true };
+    }
+
+    return { error: friendlyAuthError(signInErr.message), needsEmailConfirmation: false };
   }
 
   async function signOut(): Promise<void> {
