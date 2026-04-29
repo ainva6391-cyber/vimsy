@@ -122,7 +122,8 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   await validateImage(localUri, blob);
 
   const ext = extFromUri(localUri);
-  const path = `photos/${uniqueFilename(ext)}`;
+  // Path must start with "private/" to satisfy the Supabase INSERT policy
+  const path = `private/photos/${uniqueFilename(ext)}`;
   const contentType = blob.type && blob.type !== "application/octet-stream"
     ? blob.type
     : mimeFromExt(ext);
@@ -161,8 +162,9 @@ export async function uploadProfileImage(
   await validateImage(localUri, blob);
 
   const ext = extFromUri(localUri);
-  // Use a fixed filename per user so older avatars are overwritten
-  const path = `avatars/${userId}/avatar.${ext}`;
+  // Path must start with "private/" to satisfy the Supabase INSERT policy.
+  // Using a fixed filename per user so re-uploading overwrites the old avatar.
+  const path = `private/avatars/${userId}/avatar.${ext}`;
   const contentType = blob.type && blob.type !== "application/octet-stream"
     ? blob.type
     : mimeFromExt(ext);
