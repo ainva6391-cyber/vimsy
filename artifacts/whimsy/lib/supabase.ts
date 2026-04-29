@@ -175,11 +175,49 @@ async function storageUpload(
 }
 
 /**
- * Returns the public URL for a storage object.
- * This path IS correct to use getPublicUrl() since it's a read-only URL.
+ * Generate a signed URL for reading a storage object.
+ *
+ * Uses:  POST /storage/v1/object/sign/{bucket}/{path}
+ * Returns a URL like:
+ *   GET  /storage/v1/object/sign/{bucket}/{path}?token=...
+ *
+ * No /public/ in either path — matches the POST (upload) endpoint pattern
+ * exactly, and works in <Image> components without auth headers because the
+ * token is embedded in the query string.
+ *
+ * @param expiresIn  Seconds until the signed URL expires (default 10 years)
  */
-function publicUrl(bucket: string, path: string): string {
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+async function signedStorageUrl(
+  bucket: string,
+  path: string,
+  expiresIn = 60 * 60 * 24 * 365 * 10,
+): Promise<string> {
+  const token = await getAccessToken();
+
+  const url = `${supabaseUrl}/storage/v1/object/sign/${bucket}/${path}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expiresIn }),
+  });
+
+  if (!response.ok) {
+    // Non-fatal — fall back to the authenticated read URL which works in the app
+    console.warn(`[Supabase] createSignedUrl failed (${response.status}), using direct URL`);
+    return `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+  }
+
+  const json = await response.json() as { signedURL?: string };
+  const signedPath = json.signedURL ?? "";
+
+  // signedURL is a relative path like /storage/v1/object/sign/...?token=...
+  // Prepend the Supabase base URL if needed.
+  if (signedPath.startsWith("http")) return signedPath;
+  return `${supabaseUrl}${signedPath}`;
 }
 
 // ── Public types & functions ──────────────────────────────────────────────────
@@ -192,7 +230,8 @@ export interface UploadResult {
 /**
  * Upload an outfit/post image to user_post_images bucket.
  *
- * Path: user_post_images / private / photos / {timestamp}_{rand}.{ext}
+ * POST  /storage/v1/object/user_post_images/private/photos/{file}
+ * GET   /storage/v1/object/sign/user_post_images/private/photos/{file}?token=...
  */
 export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   const ext = validateExt(localUri);
@@ -204,14 +243,15 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
 
   await storageUpload("user_post_images", path, buffer, contentType, false);
 
-  return { publicUrl: publicUrl("user_post_images", path), path };
+  const url = await signedStorageUrl("user_post_images", path);
+  return { publicUrl: url, path };
 }
 
 /**
  * Upload a profile avatar to user_profile_images bucket.
  *
- * Path: user_profile_images / private / avatar.{ext}
- * upsert = true so re-uploading replaces the previous avatar.
+ * POST  /storage/v1/object/user_profile_images/private/avatar.{ext}
+ * GET   /storage/v1/object/sign/user_profile_images/private/avatar.{ext}?token=...
  */
 export async function uploadProfileImage(localUri: string): Promise<UploadResult> {
   const ext = validateExt(localUri);
@@ -223,5 +263,6 @@ export async function uploadProfileImage(localUri: string): Promise<UploadResult
 
   await storageUpload("user_profile_images", path, buffer, contentType, true);
 
-  return { publicUrl: publicUrl("user_profile_images", path), path };
+  const url = await signedStorageUrl("user_profile_images", path);
+  return { publicUrl: url, path };
 }
