@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React, { useRef, useState } from "react";
 import {
@@ -22,7 +24,10 @@ export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { styleCategories, posts } = useApp();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  // Use insets.top directly — returns 0 on web (no status bar) and
+  // the actual safe-area height on native iOS/Android.
+  const topPad = insets.top;
 
   const [expanded, setExpanded] = useState(false);
   const chevronAnim = useRef(new Animated.Value(0)).current;
@@ -49,6 +54,11 @@ export default function DiscoverScreen() {
     outputRange: ["0deg", "180deg"],
   });
 
+  // Derive blur tint from color scheme
+  const blurTint = colors.background === "#ffffff" || colors.background === "#FDFBFE"
+    ? "light"
+    : "dark";
+
   const header = (
     <>
       {/* ── App bar ── */}
@@ -56,7 +66,7 @@ export default function DiscoverScreen() {
         style={[
           styles.appBar,
           {
-            paddingTop: topPad + 10,
+            paddingTop: topPad + 8,
             backgroundColor: colors.background,
             borderBottomColor: colors.border,
           },
@@ -66,14 +76,11 @@ export default function DiscoverScreen() {
         <Ionicons name="sparkles-outline" size={22} color={colors.primary} />
       </View>
 
-      {/* ── Topic bar: horizontal scroll + dropdown button ── */}
+      {/* ── Topic bar: horizontal scroll + floating chevron ── */}
       <View
-        style={[
-          styles.topicBar,
-          { borderBottomColor: colors.border },
-        ]}
+        style={[styles.topicBar, { borderBottomColor: colors.border }]}
       >
-        {/* Scrollable chip strip */}
+        {/* Chip strip — extra right padding so last chip clears the chevron */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -94,29 +101,40 @@ export default function DiscoverScreen() {
           })}
         </ScrollView>
 
-        {/* Chevron toggle button */}
-        <Pressable
-          onPress={toggleExpanded}
-          style={({ pressed }) => [
-            styles.chevronBtn,
-            {
-              backgroundColor: pressed ? colors.accent : colors.tag,
-              borderColor: colors.border,
-            },
-          ]}
-          hitSlop={8}
-        >
-          <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
-            <Ionicons
-              name="chevron-down"
-              size={18}
-              color={colors.primary}
-            />
-          </Animated.View>
-        </Pressable>
+        {/* Floating chevron — overlaps right edge with gradient fade + blur */}
+        <View style={styles.chevronOverlay} pointerEvents="box-none">
+          {/* Gradient fade: transparent → background */}
+          <LinearGradient
+            colors={[`${colors.background}00`, colors.background]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={StyleSheet.absoluteFillObject}
+            pointerEvents="none"
+          />
+
+          {/* Blurred button — chips show through */}
+          <Pressable
+            onPress={toggleExpanded}
+            hitSlop={8}
+            style={styles.chevronPressable}
+          >
+            <BlurView
+              intensity={25}
+              tint={blurTint}
+              style={[
+                styles.chevronBlur,
+                { borderColor: colors.border },
+              ]}
+            >
+              <Animated.View style={{ transform: [{ rotate: chevronRotate }] }}>
+                <Ionicons name="chevron-down" size={17} color={colors.primary} />
+              </Animated.View>
+            </BlurView>
+          </Pressable>
+        </View>
       </View>
 
-      {/* ── Expanded topic grid (shown when chevron is pressed) ── */}
+      {/* ── Expanded topic grid ── */}
       {expanded && (
         <View style={[styles.topicGrid, { borderBottomColor: colors.border }]}>
           <Text style={[styles.gridLabel, { color: colors.mutedForeground }]}>
@@ -178,7 +196,7 @@ export default function DiscoverScreen() {
   );
 }
 
-// ── Topic chip ───────────────────────────────────────────────────────────────
+// ── Topic chip ────────────────────────────────────────────────────────────────
 function TopicChip({
   label,
   count,
@@ -216,13 +234,13 @@ function TopicChip({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
 
-  /* App bar */
+  /* App bar — tight Pinterest-style header */
   appBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   logo: {
@@ -231,33 +249,45 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
 
-  /* Topic bar row */
+  /* Topic bar — relative so chevron can overlay absolutely */
   topicBar: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 10,
-    paddingRight: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: 8,
   },
   chipScroll: { flex: 1 },
   chipStrip: {
     paddingLeft: 14,
-    paddingRight: 4,
+    paddingRight: 68, // clear space for the chevron overlay
     gap: 8,
     flexDirection: "row",
     alignItems: "center",
   },
 
-  /* Chevron button */
-  chevronBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
+  /* Chevron overlay — floats over right edge of the scroll view */
+  chevronOverlay: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingRight: 10,
+  },
+  chevronPressable: {},
+  chevronBlur: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
-    flexShrink: 0,
+    overflow: "hidden",
+    borderWidth: StyleSheet.hairlineWidth,
+    // 20% opacity so chips behind can be seen
+    opacity: 0.85,
   },
 
   /* Expanded grid */
@@ -318,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 14,
+    paddingTop: 12,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
