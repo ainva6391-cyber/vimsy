@@ -7,7 +7,6 @@
  *   • user_profile_images — profile avatars
  */
 import { createClient } from "@supabase/supabase-js";
-import { Platform } from "react-native";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
@@ -20,7 +19,46 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Validation ────────────────────────────────────────────────────────────────
+
+const ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+
+export class UploadValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UploadValidationError";
+  }
+}
+
+export class UploadStorageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UploadStorageError";
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extFromUri(uri: string): string {
+  // Strip query string then grab extension
+  const clean = uri.split("?")[0];
+  const match = clean.match(/\.(\w+)$/);
+  if (match) return match[1].toLowerCase();
+  return "jpg";
+}
+
+function mimeFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+    heic: "image/heic",
+    heif: "image/heif",
+  };
+  return map[ext] ?? "image/jpeg";
+}
 
 function uniqueFilename(ext = "jpg") {
   const ts = Date.now();
@@ -28,22 +66,38 @@ function uniqueFilename(ext = "jpg") {
   return `${ts}_${rand}.${ext}`;
 }
 
-function extFromUri(uri: string): string {
-  const match = uri.match(/\.(\w+)(\?|$)/);
-  if (match) return match[1].toLowerCase();
-  return "jpg";
-}
-
 /**
  * Convert a local URI (file:// or blob: or data:) to a Blob.
- * Works on both web and React Native.
+ * Works on both web and React Native (via Expo's fetch polyfill).
  */
 async function uriToBlob(uri: string): Promise<Blob> {
   const response = await fetch(uri);
+  if (!response.ok) {
+    throw new UploadStorageError(`Could not read image file (status ${response.status}).`);
+  }
   return response.blob();
 }
 
-// ── Public upload functions ───────────────────────────────────────────────────
+/**
+ * Validate extension and file size before upload.
+ * Throws UploadValidationError with a user-friendly message on failure.
+ */
+async function validateImage(uri: string, blob: Blob): Promise<void> {
+  const ext = extFromUri(uri);
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    throw new UploadValidationError(
+      `Unsupported file type ".${ext}". Please use JPG, PNG, or WebP.`,
+    );
+  }
+  if (blob.size > MAX_FILE_SIZE_BYTES) {
+    const mb = (blob.size / 1024 / 1024).toFixed(1);
+    throw new UploadValidationError(
+      `Image is too large (${mb} MB). Maximum allowed size is 15 MB.`,
+    );
+  }
+}
+
+// ── Public types & functions ──────────────────────────────────────────────────
 
 export interface UploadResult {
   publicUrl: string;
@@ -51,53 +105,75 @@ export interface UploadResult {
 }
 
 /**
- * Upload an outfit/post image.
- * @param localUri  The URI returned by expo-image-picker
- * @returns         Public URL and storage path
+ * Upload an outfit/post image to user_post_images bucket.
+ *
+ * @param localUri  URI returned by expo-image-picker
+ * @throws UploadValidationError for invalid type / size
+ * @throws UploadStorageError    for Supabase / network failures
  */
 export async function uploadPostImage(localUri: string): Promise<UploadResult> {
+  const blob = await uriToBlob(localUri);
+  await validateImage(localUri, blob);
+
   const ext = extFromUri(localUri);
   const path = `posts/${uniqueFilename(ext)}`;
-  const blob = await uriToBlob(localUri);
+  const contentType = blob.type && blob.type !== "application/octet-stream"
+    ? blob.type
+    : mimeFromExt(ext);
 
   const { error } = await supabase.storage
     .from("user_post_images")
-    .upload(path, blob, {
-      contentType: blob.type || `image/${ext}`,
-      upsert: false,
-    });
+    .upload(path, blob, { contentType, upsert: false });
 
-  if (error) throw new Error(`Post image upload failed: ${error.message}`);
+  if (error) {
+    console.error("[Supabase] Post image upload error:", error);
+    throw new UploadStorageError(
+      error.message.includes("policy")
+        ? "Storage permission denied. Please contact support."
+        : `Upload failed: ${error.message}`,
+    );
+  }
 
   const { data } = supabase.storage.from("user_post_images").getPublicUrl(path);
   return { publicUrl: data.publicUrl, path };
 }
 
 /**
- * Upload a profile avatar image.
- * @param localUri  The URI returned by expo-image-picker
- * @param userId    Used as a sub-folder to avoid collisions
- * @returns         Public URL and storage path
+ * Upload a profile avatar image to user_profile_images bucket.
+ * Uses a stable path per user so the avatar can be replaced (upsert: true).
+ *
+ * @param localUri  URI returned by expo-image-picker
+ * @param userId    Clerk user ID used as sub-folder
+ * @throws UploadValidationError for invalid type / size
+ * @throws UploadStorageError    for Supabase / network failures
  */
 export async function uploadProfileImage(
   localUri: string,
   userId: string,
 ): Promise<UploadResult> {
-  const ext = extFromUri(localUri);
-  const path = `avatars/${userId}/${uniqueFilename(ext)}`;
   const blob = await uriToBlob(localUri);
+  await validateImage(localUri, blob);
+
+  const ext = extFromUri(localUri);
+  // Use a fixed filename per user so older avatars are overwritten
+  const path = `avatars/${userId}/avatar.${ext}`;
+  const contentType = blob.type && blob.type !== "application/octet-stream"
+    ? blob.type
+    : mimeFromExt(ext);
 
   const { error } = await supabase.storage
     .from("user_profile_images")
-    .upload(path, blob, {
-      contentType: blob.type || `image/${ext}`,
-      upsert: true, // overwrite previous avatar for same user
-    });
+    .upload(path, blob, { contentType, upsert: true });
 
-  if (error) throw new Error(`Profile image upload failed: ${error.message}`);
+  if (error) {
+    console.error("[Supabase] Profile image upload error:", error);
+    throw new UploadStorageError(
+      error.message.includes("policy")
+        ? "Storage permission denied. Please contact support."
+        : `Upload failed: ${error.message}`,
+    );
+  }
 
-  const { data } = supabase.storage
-    .from("user_profile_images")
-    .getPublicUrl(path);
+  const { data } = supabase.storage.from("user_profile_images").getPublicUrl(path);
   return { publicUrl: data.publicUrl, path };
 }

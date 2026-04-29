@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { createPost } from "@/lib/apiClient";
-import { uploadPostImage } from "@/lib/supabase";
+import { uploadPostImage, UploadValidationError, UploadStorageError } from "@/lib/supabase";
 
 const ALL_TOPICS = [
   "Minimal", "Streetwear", "Cottagecore", "Boho",
@@ -95,8 +95,23 @@ export default function UploadScreen() {
       const { publicUrl } = await uploadPostImage(imageUri);
       finalImageUri = publicUrl;
     } catch (err) {
-      console.warn("[Upload] Supabase upload failed, using local URI:", err);
-      // Graceful degradation: continue with the local URI
+      if (err instanceof UploadValidationError) {
+        // File type or size invalid — block the post
+        setSubmitting(false);
+        setUploadStatus("idle");
+        Alert.alert("Can't upload photo", (err as UploadValidationError).message);
+        return;
+      } else if (err instanceof UploadStorageError) {
+        // Storage error — warn but gracefully fall back to local URI
+        console.warn("[Upload] Supabase storage error, using local URI:", err);
+        Alert.alert(
+          "Photo not saved to cloud",
+          "Your look will still be posted, but the image may not persist. Check your connection and try again.",
+          [{ text: "Post anyway" }],
+        );
+      } else {
+        console.warn("[Upload] Unexpected upload error, using local URI:", err);
+      }
     }
 
     // 2. Add to local state immediately with the public URL

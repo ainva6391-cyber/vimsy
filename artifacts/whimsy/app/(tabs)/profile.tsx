@@ -1,11 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth, useUser } from "@clerk/expo";
+import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -17,12 +18,17 @@ import MasonryGrid from "@/components/MasonryGrid";
 import UserAvatar from "@/components/UserAvatar";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
+import {
+  uploadProfileImage,
+  UploadValidationError,
+  UploadStorageError,
+} from "@/lib/supabase";
 
 function SignedOutProfile() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = insets.top;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -66,17 +72,62 @@ function SignedInProfile() {
   const { signOut } = useAuth();
   const { user } = useUser();
   const { myPosts } = useApp();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = insets.top;
+
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   function confirmSignOut() {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Sign Out",
-        style: "destructive",
-        onPress: () => signOut(),
-      },
+      { text: "Sign Out", style: "destructive", onPress: () => signOut() },
     ]);
+  }
+
+  async function pickAndUploadAvatar() {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("Permission Required", "Please allow access to your photo library to change your profile photo.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+
+    const localUri = result.assets[0].uri;
+    setAvatarUploading(true);
+
+    try {
+      // Step 1: Upload to Supabase Storage (validates type/size, returns public URL)
+      await uploadProfileImage(localUri, user!.id);
+
+      // Step 2: Also update Clerk's managed profile image so imageUrl stays fresh
+      // This is best-effort — if it fails, the Supabase copy is still stored
+      try {
+        const blob = await fetchBlob(localUri);
+        await user!.setProfileImage({ file: blob });
+        await user!.reload();
+      } catch (clerkErr) {
+        // Clerk update failed — avatar is in Supabase but Clerk imageUrl won't update
+        console.warn("[Profile] Clerk profile image update failed:", clerkErr);
+      }
+    } catch (err) {
+      if (err instanceof UploadValidationError) {
+        Alert.alert("Can't upload photo", err.message);
+      } else if (err instanceof UploadStorageError) {
+        Alert.alert("Upload failed", err.message);
+      } else {
+        Alert.alert("Upload failed", "Something went wrong. Please try again.");
+        console.error("[Profile] Avatar upload error:", err);
+      }
+    } finally {
+      setAvatarUploading(false);
+    }
   }
 
   const displayName =
@@ -85,7 +136,9 @@ function SignedInProfile() {
     user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
     "Whimsy User";
   const username =
-    user?.username || user?.primaryEmailAddress?.emailAddress?.split("@")[0] || "whimsy.user";
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress?.split("@")[0] ||
+    "whimsy.user";
   const avatarUri = user?.imageUrl ?? null;
 
   const header = (
@@ -96,9 +149,22 @@ function SignedInProfile() {
           <Ionicons name="log-out-outline" size={22} color={colors.mutedForeground} />
         </Pressable>
       </View>
-      <UserAvatar uri={avatarUri} size={80} />
+
+      {/* Tappable avatar with camera overlay */}
+      <Pressable onPress={pickAndUploadAvatar} disabled={avatarUploading} style={styles.avatarWrap}>
+        <UserAvatar uri={avatarUri} size={80} />
+        <View style={[styles.avatarOverlay, { backgroundColor: "rgba(0,0,0,0.38)" }]}>
+          {avatarUploading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Ionicons name="camera" size={18} color="#fff" />
+          )}
+        </View>
+      </Pressable>
+
       <Text style={[styles.displayName, { color: colors.foreground }]}>{displayName}</Text>
       <Text style={[styles.username, { color: colors.mutedForeground }]}>@{username}</Text>
+
       <View style={styles.statsRow}>
         <View style={styles.stat}>
           <Text style={[styles.statNum, { color: colors.foreground }]}>{myPosts.length}</Text>
@@ -142,6 +208,15 @@ export default function ProfileScreen() {
   const { isSignedIn } = useAuth();
   return isSignedIn ? <SignedInProfile /> : <SignedOutProfile />;
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function fetchBlob(uri: string): Promise<Blob> {
+  const response = await fetch(uri);
+  return response.blob();
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -216,6 +291,21 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   signOutBtn: { padding: 6 },
+  avatarWrap: {
+    position: "relative",
+    width: 80,
+    height: 80,
+  },
+  avatarOverlay: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   displayName: {
     fontSize: 22,
     fontFamily: "Inter_700Bold",
