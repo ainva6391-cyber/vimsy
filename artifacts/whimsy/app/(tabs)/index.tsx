@@ -25,6 +25,10 @@ export default function DiscoverScreen() {
   const router = useRouter();
   const { styleCategories, posts } = useApp();
 
+  const feedPosts = [...posts].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
   // Use insets.top directly — returns 0 on web (no status bar) and
   // the actual safe-area height on native iOS/Android.
   const topPad = insets.top;
@@ -180,7 +184,7 @@ export default function DiscoverScreen() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <MasonryGrid
-        posts={posts}
+        posts={feedPosts}
         ListHeaderComponent={header}
         style={styles.gridPad}
         ListEmptyComponent={
