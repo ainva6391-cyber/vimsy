@@ -1,27 +1,27 @@
 /**
  * Supabase client + Storage helpers for Whimsy.
  *
- * Buckets (both public):
+ * Buckets (both public-read):
  *   • user_post_images    — outfit/post photos
  *   • user_profile_images — profile avatars
  *
  * Both buckets have one INSERT policy:
  *   (storage.foldername(name))[1] = 'private'
- * so every path MUST start with  private/
  *
- * Upload strategy: ArrayBuffer (not Blob) — this is the approach that works
- * reliably in React Native / Expo environments.
+ * Upload strategy: direct REST API calls via fetch.
+ * The Supabase JS SDK routes uploads for public buckets to the read-only
+ * /object/public/ endpoint in React Native, causing 400 errors. Bypassing the
+ * SDK and calling /storage/v1/object/{bucket}/{path} directly with an explicit
+ * Authorization header avoids this entirely.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
+const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn(
-    "[Supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY",
-  );
+  console.warn("[Supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY");
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -81,23 +81,6 @@ function uniqueFilename(ext = "jpg") {
   return `${ts}_${rand}.${ext}`;
 }
 
-/**
- * Fetch a local URI and return an ArrayBuffer.
- * ArrayBuffer is the most reliable upload format in React Native / Expo.
- */
-async function uriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
-  const response = await fetch(uri);
-  if (!response.ok) {
-    throw new UploadStorageError(
-      `Could not read image file (HTTP ${response.status}).`,
-    );
-  }
-  return response.arrayBuffer();
-}
-
-/**
- * Validate extension and file size before upload.
- */
 function validateExt(uri: string): string {
   const ext = extFromUri(uri);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
@@ -118,19 +101,85 @@ function validateSize(byteLength: number): void {
 }
 
 /**
- * Build a human-readable message from a Supabase StorageError.
- * Surfaces the real error code/message so issues are diagnosable.
+ * Fetch a local URI (file://) and return an ArrayBuffer.
  */
-function storageErrorMessage(
-  context: string,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  err: any,
-): string {
-  const status: string = err?.statusCode ?? err?.status ?? "";
-  const code: string = err?.error ?? "";
-  const msg: string = err?.message ?? String(err);
-  console.error(`[Supabase] ${context}:`, { status, code, msg, raw: err });
-  return `Upload failed (${status || code || "unknown"}): ${msg}`;
+async function uriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new UploadStorageError(
+      `Could not read image file (HTTP ${response.status}).`,
+    );
+  }
+  return response.arrayBuffer();
+}
+
+/**
+ * Get the current session's JWT, throwing a clear error if not signed in.
+ */
+async function getAccessToken(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session?.access_token) {
+    throw new UploadStorageError(
+      "You must be signed in to upload photos. Please sign in and try again.",
+    );
+  }
+  return data.session.access_token;
+}
+
+/**
+ * Upload to Supabase Storage via direct REST API call.
+ *
+ * Uses POST /storage/v1/object/{bucket}/{path} — the correct write endpoint —
+ * instead of letting the SDK route through /object/public/ which is read-only.
+ *
+ * @param bucket    Bucket name (e.g. "user_post_images")
+ * @param path      Object path within the bucket (must satisfy RLS policy)
+ * @param buffer    File bytes
+ * @param contentType  MIME type
+ * @param upsert    true = overwrite existing file
+ */
+async function storageUpload(
+  bucket: string,
+  path: string,
+  buffer: ArrayBuffer,
+  contentType: string,
+  upsert = false,
+): Promise<void> {
+  const token = await getAccessToken();
+
+  const url = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": contentType,
+      "x-upsert": upsert ? "true" : "false",
+    },
+    body: buffer,
+  });
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const json = await response.json() as { error?: string; message?: string };
+      detail = json.error ?? json.message ?? "";
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    console.error(`[Supabase] Storage upload failed: ${response.status} — ${detail}`);
+    throw new UploadStorageError(
+      `Upload failed (${response.status}): ${detail || response.statusText}`,
+    );
+  }
+}
+
+/**
+ * Returns the public URL for a storage object.
+ * This path IS correct to use getPublicUrl() since it's a read-only URL.
+ */
+function publicUrl(bucket: string, path: string): string {
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
 }
 
 // ── Public types & functions ──────────────────────────────────────────────────
@@ -141,25 +190,11 @@ export interface UploadResult {
 }
 
 /**
- * Assert that a valid Supabase session exists before attempting storage ops.
- * Surfaces a clear error instead of a confusing 401/403 from storage.
- */
-async function requireSession(): Promise<void> {
-  const { data } = await supabase.auth.getSession();
-  if (!data.session) {
-    throw new UploadStorageError(
-      "You must be signed in to upload photos. Please sign in and try again.",
-    );
-  }
-}
-
-/**
  * Upload an outfit/post image to user_post_images bucket.
- * Path: private/photos/<timestamp>_<rand>.<ext>
+ *
+ * Path: user_post_images / private / photos / {timestamp}_{rand}.{ext}
  */
 export async function uploadPostImage(localUri: string): Promise<UploadResult> {
-  await requireSession();
-
   const ext = validateExt(localUri);
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
@@ -167,52 +202,26 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   const path = `private/photos/${uniqueFilename(ext)}`;
   const contentType = mimeFromExt(ext);
 
-  const { error } = await supabase.storage
-    .from("user_post_images")
-    .upload(path, buffer, { contentType, upsert: false });
+  await storageUpload("user_post_images", path, buffer, contentType, false);
 
-  if (error) {
-    throw new UploadStorageError(
-      storageErrorMessage("Post image upload", error),
-    );
-  }
-
-  const { data } = supabase.storage.from("user_post_images").getPublicUrl(path);
-  return { publicUrl: data.publicUrl, path };
+  return { publicUrl: publicUrl("user_post_images", path), path };
 }
 
 /**
  * Upload a profile avatar to user_profile_images bucket.
- * Uses a stable path per user so re-uploading replaces the old avatar.
  *
- * Bucket structure: user_profile_images / private / avatar.{ext}
- * Matches the INSERT policy: (storage.foldername(name))[1] = 'private'
+ * Path: user_profile_images / private / avatar.{ext}
+ * upsert = true so re-uploading replaces the previous avatar.
  */
-export async function uploadProfileImage(
-  localUri: string,
-): Promise<UploadResult> {
-  await requireSession();
-
+export async function uploadProfileImage(localUri: string): Promise<UploadResult> {
   const ext = validateExt(localUri);
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
 
-  // Stable path: private/avatar.{ext} — matches bucket folder structure exactly
   const path = `private/avatar.${ext}`;
   const contentType = mimeFromExt(ext);
 
-  const { error } = await supabase.storage
-    .from("user_profile_images")
-    .upload(path, buffer, { contentType, upsert: true });
+  await storageUpload("user_profile_images", path, buffer, contentType, true);
 
-  if (error) {
-    throw new UploadStorageError(
-      storageErrorMessage("Profile image upload", error),
-    );
-  }
-
-  const { data } = supabase.storage
-    .from("user_profile_images")
-    .getPublicUrl(path);
-  return { publicUrl: data.publicUrl, path };
+  return { publicUrl: publicUrl("user_profile_images", path), path };
 }
