@@ -70,11 +70,14 @@ function SignedOutProfile() {
 function SignedInProfile() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, signOut } = useAuth();
+  const { user, signOut, refreshUser } = useAuth();
   const { myPosts } = useApp();
   const topPad = insets.top;
 
   const [avatarUploading, setAvatarUploading] = useState(false);
+  // Local preview — updates immediately after a successful upload so the
+  // user doesn't have to wait for a full session refresh to see their new photo.
+  const [localAvatarUri, setLocalAvatarUri] = useState<string | null>(null);
 
   function confirmSignOut() {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -86,34 +89,47 @@ function SignedInProfile() {
   async function pickAndUploadAvatar() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission Required", "Please allow access to your photo library to change your profile photo.");
+      Alert.alert(
+        "Permission Required",
+        "Please allow access to your photo library to change your profile photo.",
+      );
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.85,
+      allowsEditing: true,   // opens the built-in square crop editor
+      aspect: [1, 1],        // enforces a 1:1 ratio to match the circular avatar
+      quality: 0.9,
     });
 
     if (result.canceled || !result.assets[0]) return;
 
     const localUri = result.assets[0].uri;
+    // Show the cropped image immediately — no spinner-wait needed for the preview
+    setLocalAvatarUri(localUri);
     setAvatarUploading(true);
 
     try {
-      // Step 1: Upload to Supabase Storage (validates type/size, returns public URL)
+      // 1. Upload the cropped image to Supabase Storage → user_profile_images/avatars/
       const { publicUrl } = await uploadProfileImage(localUri, user!.id);
 
-      // Step 2: Store the public URL in Supabase user metadata so it persists across sessions
+      // 2. Persist the public URL in Supabase user metadata
       const { error: updateErr } = await supabase.auth.updateUser({
         data: { avatar_url: publicUrl },
       });
       if (updateErr) {
-        console.warn("[Profile] Supabase updateUser failed:", updateErr.message);
+        console.warn("[Profile] updateUser failed:", updateErr.message);
       }
+
+      // 3. Re-sync local session so user.user_metadata reflects the new avatar_url
+      await refreshUser();
+
+      // 4. Swap local preview for the stable CDN URL
+      setLocalAvatarUri(publicUrl);
     } catch (err) {
+      // On failure, revert the optimistic preview
+      setLocalAvatarUri(null);
       if (err instanceof UploadValidationError) {
         Alert.alert("Can't upload photo", err.message);
       } else if (err instanceof UploadStorageError) {
@@ -137,7 +153,8 @@ function SignedInProfile() {
     (meta.username as string) ||
     user?.email?.split("@")[0] ||
     "whimsy.user";
-  const avatarUri = (meta.avatar_url as string) ?? null;
+  // Prefer the optimistic local URI; fall back to the persisted URL from metadata
+  const avatarUri = localAvatarUri ?? (meta.avatar_url as string) ?? null;
 
   const header = (
     <View style={[styles.profileHeader, { paddingTop: topPad + 10 }]}>
@@ -148,14 +165,20 @@ function SignedInProfile() {
         </Pressable>
       </View>
 
-      {/* Tappable avatar with camera overlay */}
-      <Pressable onPress={pickAndUploadAvatar} disabled={avatarUploading} style={styles.avatarWrap}>
-        <UserAvatar uri={avatarUri} size={80} />
-        <View style={[styles.avatarOverlay, { backgroundColor: "rgba(0,0,0,0.38)" }]}>
+      {/* Tappable avatar with camera badge */}
+      <Pressable
+        onPress={pickAndUploadAvatar}
+        disabled={avatarUploading}
+        style={[styles.avatarWrap, { opacity: avatarUploading ? 0.7 : 1 }]}
+      >
+        <View style={[styles.avatarRing, { borderColor: colors.primary }]}>
+          <UserAvatar uri={avatarUri} size={88} />
+        </View>
+        <View style={[styles.cameraBadge, { backgroundColor: colors.primary, borderColor: colors.background }]}>
           {avatarUploading ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Ionicons name="camera" size={18} color="#fff" />
+            <Ionicons name="camera" size={15} color="#fff" />
           )}
         </View>
       </Pressable>
@@ -284,18 +307,33 @@ const styles = StyleSheet.create({
   signOutBtn: { padding: 6 },
   avatarWrap: {
     position: "relative",
-    width: 80,
-    height: 80,
+    width: 96,
+    height: 96,
+    marginBottom: 4,
   },
-  avatarOverlay: {
-    position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  avatarRing: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2.5,
     alignItems: "center",
     justifyContent: "center",
+  },
+  cameraBadge: {
+    position: "absolute",
+    bottom: 2,
+    right: 2,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2.5,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   displayName: {
     fontSize: 22,

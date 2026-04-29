@@ -15,6 +15,7 @@ interface AuthContextType {
     meta: { name: string; username: string },
   ) => Promise<{ error: string | null; needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -68,6 +69,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   }
 
+  async function refreshUser(): Promise<void> {
+    const { data } = await supabase.auth.refreshSession();
+    if (data.session) setSession(data.session);
+  }
+
   return (
     <AuthContext.Provider
       value={{
@@ -77,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn,
         signUp,
         signOut,
+        refreshUser,
       }}
     >
       {children}
