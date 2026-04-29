@@ -122,7 +122,7 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   await validateImage(localUri, blob);
 
   const ext = extFromUri(localUri);
-  const path = `posts/${uniqueFilename(ext)}`;
+  const path = `photos/${uniqueFilename(ext)}`;
   const contentType = blob.type && blob.type !== "application/octet-stream"
     ? blob.type
     : mimeFromExt(ext);
@@ -149,7 +149,7 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
  * Uses a stable path per user so the avatar can be replaced (upsert: true).
  *
  * @param localUri  URI returned by expo-image-picker
- * @param userId    Clerk user ID used as sub-folder
+ * @param userId    Supabase user ID used as sub-folder
  * @throws UploadValidationError for invalid type / size
  * @throws UploadStorageError    for Supabase / network failures
  */
