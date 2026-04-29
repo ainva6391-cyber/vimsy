@@ -85,7 +85,7 @@ export default function PostDetailScreen() {
   }
 
   const imgHeight = SCREEN_WIDTH / post.aspectRatio;
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = insets.top;
 
   // Related posts: same style, exclude current post, max 6
   const relatedPosts = posts
@@ -182,7 +182,7 @@ export default function PostDetailScreen() {
         style={[
           styles.navBar,
           {
-            paddingTop: topPad,
+            paddingTop: topPad + 6,
             backgroundColor: colors.background,
             borderBottomColor: colors.border,
           },
@@ -640,12 +640,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 14,
-    paddingBottom: 10,
+    paddingBottom: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   navBtn: { padding: 7 },
 
-  content: { padding: 18, gap: 16 },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0, gap: 11 },
 
   authorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   authorInfo: { flex: 1 },
@@ -688,8 +688,8 @@ const styles = StyleSheet.create({
   // Comments
   commentsBlock: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 16,
-    gap: 14,
+    paddingTop: 12,
+    gap: 10,
   },
   commentSectionTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
   noComments: {
@@ -728,8 +728,8 @@ const styles = StyleSheet.create({
   // Related posts
   relatedSection: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 18,
-    gap: 14,
+    paddingTop: 12,
+    gap: 10,
   },
   relatedTitle: { fontSize: 15, fontFamily: "Inter_700Bold" },
   relatedGrid: {
