@@ -8,7 +8,6 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,6 +20,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { createPost } from "@/lib/apiClient";
+import { uploadPostImage } from "@/lib/supabase";
 
 const ALL_TOPICS = [
   "Minimal", "Streetwear", "Cottagecore", "Boho",
@@ -43,8 +43,9 @@ export default function UploadScreen() {
   const [tags, setTags] = useState<string[]>([]);
   const [selectedTopic, setSelectedTopic] = useState<string>("Minimal");
   const [submitting, setSubmitting] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "saving">("idle");
 
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const topPad = insets.top;
 
   async function pickImage() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -87,9 +88,21 @@ export default function UploadScreen() {
     setSubmitting(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    // 1. Add to local state immediately (optimistic)
+    // 1. Upload image to Supabase Storage → get a permanent public URL
+    let finalImageUri = imageUri;
+    try {
+      setUploadStatus("uploading");
+      const { publicUrl } = await uploadPostImage(imageUri);
+      finalImageUri = publicUrl;
+    } catch (err) {
+      console.warn("[Upload] Supabase upload failed, using local URI:", err);
+      // Graceful degradation: continue with the local URI
+    }
+
+    // 2. Add to local state immediately with the public URL
+    setUploadStatus("saving");
     addPost({
-      imageUri,
+      imageUri: finalImageUri,
       caption: caption.trim(),
       tags,
       style: selectedTopic,
@@ -101,13 +114,13 @@ export default function UploadScreen() {
       aspectRatio: imageSize.width / imageSize.height,
     });
 
-    // 2. Also persist to DB (fire-and-forget, graceful degradation)
+    // 3. Persist to DB with the Supabase URL (fire-and-forget)
     try {
       const token = await getToken();
       if (token) {
         await createPost(
           {
-            imageUrl: imageUri,
+            imageUrl: finalImageUri,
             caption: caption.trim() || undefined,
             style: selectedTopic,
             tags: tags.length > 0 ? tags : undefined,
@@ -116,11 +129,11 @@ export default function UploadScreen() {
         );
       }
     } catch (err) {
-      // DB persist failed — local state is still updated, so UX is fine
       console.warn("[Upload] DB persist failed:", err);
     }
 
     setSubmitting(false);
+    setUploadStatus("idle");
     setImageUri(null);
     setCaption("");
     setTags([]);
@@ -152,7 +165,12 @@ export default function UploadScreen() {
           disabled={submitting || !imageUri}
         >
           {submitting ? (
-            <ActivityIndicator color={colors.primaryForeground} size="small" />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <ActivityIndicator color={colors.primaryForeground} size="small" />
+              <Text style={[styles.postBtnText, { color: colors.primaryForeground }]}>
+                {uploadStatus === "uploading" ? "Uploading…" : "Saving…"}
+              </Text>
+            </View>
           ) : (
             <Text
               style={[
