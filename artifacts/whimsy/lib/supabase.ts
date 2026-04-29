@@ -19,7 +19,9 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn("[Supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY");
+  console.warn(
+    "[Supabase] Missing EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY",
+  );
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -170,7 +172,9 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
     .upload(path, buffer, { contentType, upsert: false });
 
   if (error) {
-    throw new UploadStorageError(storageErrorMessage("Post image upload", error));
+    throw new UploadStorageError(
+      storageErrorMessage("Post image upload", error),
+    );
   }
 
   const { data } = supabase.storage.from("user_post_images").getPublicUrl(path);
@@ -180,7 +184,9 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
 /**
  * Upload a profile avatar to user_profile_images bucket.
  * Uses a stable path per user so re-uploading replaces the old avatar.
- * Path: private/avatars/<userId>/avatar.<ext>
+ *
+ * Bucket structure: user_profile_images/private/avatar/{userId}/avatar.{ext}
+ * Matches the INSERT policy: (storage.foldername(name))[1] = 'private'
  */
 export async function uploadProfileImage(
   localUri: string,
@@ -192,7 +198,8 @@ export async function uploadProfileImage(
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
 
-  const path = `private/avatars/${userId}/avatar.${ext}`;
+  // Stable path per user — uploading again replaces the old avatar (upsert: true)
+  const path = `private/avatar/${userId}/avatar.${ext}`;
   const contentType = mimeFromExt(ext);
 
   const { error } = await supabase.storage
@@ -200,9 +207,13 @@ export async function uploadProfileImage(
     .upload(path, buffer, { contentType, upsert: true });
 
   if (error) {
-    throw new UploadStorageError(storageErrorMessage("Profile image upload", error));
+    throw new UploadStorageError(
+      storageErrorMessage("Profile image upload", error),
+    );
   }
 
-  const { data } = supabase.storage.from("user_profile_images").getPublicUrl(path);
+  const { data } = supabase.storage
+    .from("user_profile_images")
+    .getPublicUrl(path);
   return { publicUrl: data.publicUrl, path };
 }
