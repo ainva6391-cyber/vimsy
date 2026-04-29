@@ -111,8 +111,8 @@ function SignedInProfile() {
     setAvatarUploading(true);
 
     try {
-      // 1. Upload the cropped image to Supabase Storage → user_profile_images/avatars/
-      const { publicUrl } = await uploadProfileImage(localUri, user!.id);
+      // 1. Upload the cropped image → user_profile_images/private/avatar.{ext}
+      const { publicUrl } = await uploadProfileImage(localUri);
 
       // 2. Persist the public URL in Supabase user metadata
       const { error: updateErr } = await supabase.auth.updateUser({

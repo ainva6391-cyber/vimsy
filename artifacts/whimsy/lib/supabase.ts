@@ -185,12 +185,11 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
  * Upload a profile avatar to user_profile_images bucket.
  * Uses a stable path per user so re-uploading replaces the old avatar.
  *
- * Bucket structure: user_profile_images/private/avatar/{userId}/avatar.{ext}
+ * Bucket structure: user_profile_images / private / avatar.{ext}
  * Matches the INSERT policy: (storage.foldername(name))[1] = 'private'
  */
 export async function uploadProfileImage(
   localUri: string,
-  userId: string,
 ): Promise<UploadResult> {
   await requireSession();
 
@@ -198,8 +197,8 @@ export async function uploadProfileImage(
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
 
-  // Stable path per user — uploading again replaces the old avatar (upsert: true)
-  const path = `private/avatar/${userId}/avatar.${ext}`;
+  // Stable path: private/avatar.{ext} — matches bucket folder structure exactly
+  const path = `private/avatar.${ext}`;
   const contentType = mimeFromExt(ext);
 
   const { error } = await supabase.storage
