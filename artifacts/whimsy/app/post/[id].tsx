@@ -398,8 +398,8 @@ export default function PostDetailScreen() {
           </Pressable>
         </ScrollView>
 
-        {/* ── Comment input bar (only when comments open and signed in) ── */}
-        {showComments && isSignedIn && (
+        {/* ── Comment input bar (shows whenever comments are open) ── */}
+        {showComments && (
           <View
             style={[
               styles.commentInputBar,
@@ -410,7 +410,10 @@ export default function PostDetailScreen() {
               },
             ]}
           >
-            <UserAvatar uri={user?.imageUrl ?? currentUser.avatar} size={34} />
+            <UserAvatar
+              uri={isSignedIn ? (user?.imageUrl ?? currentUser.avatar) : currentUser.avatar}
+              size={34}
+            />
             <TextInput
               style={[
                 styles.commentTextField,
@@ -420,14 +423,13 @@ export default function PostDetailScreen() {
                   color: colors.foreground,
                 },
               ]}
-              placeholder="Add a comment..."
+              placeholder="Write a comment…"
               placeholderTextColor={colors.mutedForeground}
               value={commentText}
               onChangeText={setCommentText}
               returnKeyType="send"
               onSubmitEditing={handleComment}
               multiline
-              autoFocus
             />
             <Pressable
               onPress={handleComment}
