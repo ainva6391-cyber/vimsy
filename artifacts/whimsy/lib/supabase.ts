@@ -1,10 +1,16 @@
 /**
- * Supabase Storage client for Whimsy.
- * Used exclusively for image uploads — no auth, no DB tables.
+ * Supabase client + Storage helpers for Whimsy.
  *
  * Buckets (both public):
  *   • user_post_images    — outfit/post photos
  *   • user_profile_images — profile avatars
+ *
+ * Both buckets have one INSERT policy:
+ *   (storage.foldername(name))[1] = 'private'
+ * so every path MUST start with  private/
+ *
+ * Upload strategy: ArrayBuffer (not Blob) — this is the approach that works
+ * reliably in React Native / Expo environments.
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
@@ -25,10 +31,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-// ── Validation ────────────────────────────────────────────────────────────────
-
-const ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
-const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+// ── Error classes ──────────────────────────────────────────────────────────────
 
 export class UploadValidationError extends Error {
   constructor(message: string) {
@@ -44,10 +47,14 @@ export class UploadStorageError extends Error {
   }
 }
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const ALLOWED_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"];
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extFromUri(uri: string): string {
-  // Strip query string then grab extension
   const clean = uri.split("?")[0];
   const match = clean.match(/\.(\w+)$/);
   if (match) return match[1].toLowerCase();
@@ -73,34 +80,55 @@ function uniqueFilename(ext = "jpg") {
 }
 
 /**
- * Convert a local URI (file:// or blob: or data:) to a Blob.
- * Works on both web and React Native (via Expo's fetch polyfill).
+ * Fetch a local URI and return an ArrayBuffer.
+ * ArrayBuffer is the most reliable upload format in React Native / Expo.
  */
-async function uriToBlob(uri: string): Promise<Blob> {
+async function uriToArrayBuffer(uri: string): Promise<ArrayBuffer> {
   const response = await fetch(uri);
   if (!response.ok) {
-    throw new UploadStorageError(`Could not read image file (status ${response.status}).`);
+    throw new UploadStorageError(
+      `Could not read image file (HTTP ${response.status}).`,
+    );
   }
-  return response.blob();
+  return response.arrayBuffer();
 }
 
 /**
  * Validate extension and file size before upload.
- * Throws UploadValidationError with a user-friendly message on failure.
  */
-async function validateImage(uri: string, blob: Blob): Promise<void> {
+function validateExt(uri: string): string {
   const ext = extFromUri(uri);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     throw new UploadValidationError(
       `Unsupported file type ".${ext}". Please use JPG, PNG, or WebP.`,
     );
   }
-  if (blob.size > MAX_FILE_SIZE_BYTES) {
-    const mb = (blob.size / 1024 / 1024).toFixed(1);
+  return ext;
+}
+
+function validateSize(byteLength: number): void {
+  if (byteLength > MAX_FILE_SIZE_BYTES) {
+    const mb = (byteLength / 1024 / 1024).toFixed(1);
     throw new UploadValidationError(
-      `Image is too large (${mb} MB). Maximum allowed size is 15 MB.`,
+      `Image is too large (${mb} MB). Maximum allowed is 15 MB.`,
     );
   }
+}
+
+/**
+ * Build a human-readable message from a Supabase StorageError.
+ * Surfaces the real error code/message so issues are diagnosable.
+ */
+function storageErrorMessage(
+  context: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  err: any,
+): string {
+  const status: string = err?.statusCode ?? err?.status ?? "";
+  const code: string = err?.error ?? "";
+  const msg: string = err?.message ?? String(err);
+  console.error(`[Supabase] ${context}:`, { status, code, msg, raw: err });
+  return `Upload failed (${status || code || "unknown"}): ${msg}`;
 }
 
 // ── Public types & functions ──────────────────────────────────────────────────
@@ -111,34 +139,38 @@ export interface UploadResult {
 }
 
 /**
+ * Assert that a valid Supabase session exists before attempting storage ops.
+ * Surfaces a clear error instead of a confusing 401/403 from storage.
+ */
+async function requireSession(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) {
+    throw new UploadStorageError(
+      "You must be signed in to upload photos. Please sign in and try again.",
+    );
+  }
+}
+
+/**
  * Upload an outfit/post image to user_post_images bucket.
- *
- * @param localUri  URI returned by expo-image-picker
- * @throws UploadValidationError for invalid type / size
- * @throws UploadStorageError    for Supabase / network failures
+ * Path: private/photos/<timestamp>_<rand>.<ext>
  */
 export async function uploadPostImage(localUri: string): Promise<UploadResult> {
-  const blob = await uriToBlob(localUri);
-  await validateImage(localUri, blob);
+  await requireSession();
 
-  const ext = extFromUri(localUri);
-  // Path must start with "private/" to satisfy the Supabase INSERT policy
+  const ext = validateExt(localUri);
+  const buffer = await uriToArrayBuffer(localUri);
+  validateSize(buffer.byteLength);
+
   const path = `private/photos/${uniqueFilename(ext)}`;
-  const contentType = blob.type && blob.type !== "application/octet-stream"
-    ? blob.type
-    : mimeFromExt(ext);
+  const contentType = mimeFromExt(ext);
 
   const { error } = await supabase.storage
     .from("user_post_images")
-    .upload(path, blob, { contentType, upsert: false });
+    .upload(path, buffer, { contentType, upsert: false });
 
   if (error) {
-    console.error("[Supabase] Post image upload error:", error);
-    throw new UploadStorageError(
-      error.message.includes("policy")
-        ? "Storage permission denied. Please contact support."
-        : `Upload failed: ${error.message}`,
-    );
+    throw new UploadStorageError(storageErrorMessage("Post image upload", error));
   }
 
   const { data } = supabase.storage.from("user_post_images").getPublicUrl(path);
@@ -146,40 +178,29 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
 }
 
 /**
- * Upload a profile avatar image to user_profile_images bucket.
- * Uses a stable path per user so the avatar can be replaced (upsert: true).
- *
- * @param localUri  URI returned by expo-image-picker
- * @param userId    Supabase user ID used as sub-folder
- * @throws UploadValidationError for invalid type / size
- * @throws UploadStorageError    for Supabase / network failures
+ * Upload a profile avatar to user_profile_images bucket.
+ * Uses a stable path per user so re-uploading replaces the old avatar.
+ * Path: private/avatars/<userId>/avatar.<ext>
  */
 export async function uploadProfileImage(
   localUri: string,
   userId: string,
 ): Promise<UploadResult> {
-  const blob = await uriToBlob(localUri);
-  await validateImage(localUri, blob);
+  await requireSession();
 
-  const ext = extFromUri(localUri);
-  // Path must start with "private/" to satisfy the Supabase INSERT policy.
-  // Using a fixed filename per user so re-uploading overwrites the old avatar.
+  const ext = validateExt(localUri);
+  const buffer = await uriToArrayBuffer(localUri);
+  validateSize(buffer.byteLength);
+
   const path = `private/avatars/${userId}/avatar.${ext}`;
-  const contentType = blob.type && blob.type !== "application/octet-stream"
-    ? blob.type
-    : mimeFromExt(ext);
+  const contentType = mimeFromExt(ext);
 
   const { error } = await supabase.storage
     .from("user_profile_images")
-    .upload(path, blob, { contentType, upsert: true });
+    .upload(path, buffer, { contentType, upsert: true });
 
   if (error) {
-    console.error("[Supabase] Profile image upload error:", error);
-    throw new UploadStorageError(
-      error.message.includes("policy")
-        ? "Storage permission denied. Please contact support."
-        : `Upload failed: ${error.message}`,
-    );
+    throw new UploadStorageError(storageErrorMessage("Profile image upload", error));
   }
 
   const { data } = supabase.storage.from("user_profile_images").getPublicUrl(path);
