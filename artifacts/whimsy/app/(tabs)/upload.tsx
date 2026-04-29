@@ -1,4 +1,5 @@
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import { useAuth, useUser } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
@@ -17,13 +18,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import StyleTag from "@/components/StyleTag";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { createPost } from "@/lib/apiClient";
 
-const STYLES = [
+const ALL_TOPICS = [
   "Minimal", "Streetwear", "Cottagecore", "Boho",
-  "Y2K", "Dark Academia", "Old Money", "Sporty", "Romantic",
+  "Y2K", "Dark Academia", "Old Money", "Sporty",
+  "Romantic", "Grunge", "Business Casual", "Coastal",
 ];
 
 export default function UploadScreen() {
@@ -31,13 +33,15 @@ export default function UploadScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { addPost, currentUser } = useApp();
+  const { getToken } = useAuth();
+  const { user } = useUser();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState({ width: 3, height: 4 });
   const [caption, setCaption] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
-  const [selectedStyle, setSelectedStyle] = useState<string>("Minimal");
+  const [selectedTopic, setSelectedTopic] = useState<string>("Minimal");
   const [submitting, setSubmitting] = useState(false);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
@@ -56,7 +60,6 @@ export default function UploadScreen() {
     if (!result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
       setImageUri(asset.uri);
-      // Some platforms may not provide dimensions — default to portrait 3:4
       const w = asset.width && asset.width > 0 ? asset.width : 3;
       const h = asset.height && asset.height > 0 ? asset.height : 4;
       setImageSize({ width: w, height: h });
@@ -64,8 +67,8 @@ export default function UploadScreen() {
   }
 
   function addTag() {
-    const clean = tagInput.trim().toLowerCase().replace(/\s+/g, " ");
-    if (clean && !tags.includes(clean) && tags.length < 8) {
+    const clean = tagInput.trim().toLowerCase().replace(/#+/g, "").replace(/\s+/g, " ");
+    if (clean && !tags.includes(clean) && tags.length < 10) {
       setTags([...tags, clean]);
       setTagInput("");
     }
@@ -77,37 +80,58 @@ export default function UploadScreen() {
 
   async function handlePost() {
     if (!imageUri) {
-      Alert.alert("No photo", "Pick a photo first.");
+      Alert.alert("No photo", "Tap the photo area to pick an image first.");
       return;
     }
-    if (!caption.trim()) {
-      Alert.alert("Add a caption", "Tell the world about this look.");
-      return;
-    }
+
     setSubmitting(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+    // 1. Add to local state immediately (optimistic)
     addPost({
       imageUri,
       caption: caption.trim(),
       tags,
-      style: selectedStyle,
+      style: selectedTopic,
       userId: currentUser.id,
-      username: currentUser.username,
-      userAvatar: currentUser.avatar,
+      username: user?.username ?? currentUser.username,
+      userAvatar: user?.imageUrl ?? currentUser.avatar,
       width: imageSize.width,
       height: imageSize.height,
       aspectRatio: imageSize.width / imageSize.height,
     });
+
+    // 2. Also persist to DB (fire-and-forget, graceful degradation)
+    try {
+      const token = await getToken();
+      if (token) {
+        await createPost(
+          {
+            imageUrl: imageUri,
+            caption: caption.trim() || undefined,
+            style: selectedTopic,
+            tags: tags.length > 0 ? tags : undefined,
+          },
+          token,
+        );
+      }
+    } catch (err) {
+      // DB persist failed — local state is still updated, so UX is fine
+      console.warn("[Upload] DB persist failed:", err);
+    }
+
     setSubmitting(false);
     setImageUri(null);
     setCaption("");
     setTags([]);
     setTagInput("");
+    setSelectedTopic("Minimal");
     router.replace("/(tabs)");
   }
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      {/* Header */}
       <View
         style={[
           styles.header,
@@ -119,68 +143,123 @@ export default function UploadScreen() {
         ]}
       >
         <Text style={[styles.title, { color: colors.foreground }]}>Share a Look</Text>
-        {imageUri && (
-          <Pressable
-            onPress={handlePost}
-            style={[styles.postBtn, { backgroundColor: colors.primary }]}
-            disabled={submitting}
-          >
-            {submitting ? (
-              <ActivityIndicator color={colors.primaryForeground} size="small" />
-            ) : (
-              <Text style={[styles.postBtnText, { color: colors.primaryForeground }]}>
-                Post
-              </Text>
-            )}
-          </Pressable>
-        )}
+        <Pressable
+          onPress={handlePost}
+          style={[
+            styles.postBtn,
+            { backgroundColor: imageUri ? colors.primary : colors.muted },
+          ]}
+          disabled={submitting || !imageUri}
+        >
+          {submitting ? (
+            <ActivityIndicator color={colors.primaryForeground} size="small" />
+          ) : (
+            <Text
+              style={[
+                styles.postBtnText,
+                { color: imageUri ? colors.primaryForeground : colors.mutedForeground },
+              ]}
+            >
+              Post
+            </Text>
+          )}
+        </Pressable>
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: Platform.OS === "web" ? 100 : 100 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Photo picker */}
         <Pressable
           onPress={pickImage}
           style={[
             styles.imagePicker,
             {
               backgroundColor: colors.secondary,
-              borderColor: colors.border,
+              borderColor: imageUri ? colors.primary : colors.border,
               borderStyle: imageUri ? "solid" : "dashed",
             },
           ]}
         >
           {imageUri ? (
             <>
-              <Image
-                source={{ uri: imageUri }}
-                style={styles.preview}
-                contentFit="cover"
-              />
+              <Image source={{ uri: imageUri }} style={styles.preview} contentFit="cover" />
               <Pressable
                 onPress={() => setImageUri(null)}
                 style={[styles.removeImg, { backgroundColor: colors.overlay }]}
               >
                 <Feather name="x" size={18} color="#fff" />
               </Pressable>
+              <View style={[styles.changeBadge, { backgroundColor: colors.overlay }]}>
+                <Feather name="camera" size={13} color="#fff" />
+                <Text style={styles.changeBadgeText}>Change</Text>
+              </View>
             </>
           ) : (
             <View style={styles.pickerInner}>
-              <Feather name="camera" size={36} color={colors.mutedForeground} />
-              <Text style={[styles.pickerText, { color: colors.mutedForeground }]}>
-                Tap to select a photo
+              <View style={[styles.pickerIconWrap, { backgroundColor: colors.tag }]}>
+                <Feather name="camera" size={28} color={colors.primary} />
+              </View>
+              <Text style={[styles.pickerText, { color: colors.foreground }]}>
+                Upload your outfit
               </Text>
               <Text style={[styles.pickerSub, { color: colors.mutedForeground }]}>
-                Only photos allowed
+                JPG, PNG · tap to browse
               </Text>
             </View>
           )}
         </Pressable>
 
+        {/* Topic selector */}
         <View style={styles.section}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Caption</Text>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+            <Text style={[styles.label, { color: colors.foreground }]}>Topic</Text>
+          </View>
+          <View style={styles.topicGrid}>
+            {ALL_TOPICS.map((topic) => {
+              const selected = selectedTopic === topic;
+              return (
+                <Pressable
+                  key={topic}
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setSelectedTopic(topic);
+                  }}
+                  style={[
+                    styles.topicChip,
+                    {
+                      backgroundColor: selected ? colors.primary : colors.tag,
+                      borderColor: selected ? colors.primary : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.topicChipText,
+                      { color: selected ? colors.primaryForeground : colors.tagText },
+                    ]}
+                  >
+                    {topic}
+                  </Text>
+                  {selected && (
+                    <Ionicons name="checkmark" size={13} color={colors.primaryForeground} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Caption (optional) */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="chatbubble-outline" size={16} color={colors.primary} />
+            <Text style={[styles.label, { color: colors.foreground }]}>Caption</Text>
+            <Text style={[styles.optional, { color: colors.mutedForeground }]}>(optional)</Text>
+          </View>
           <TextInput
             style={[
               styles.captionInput,
@@ -190,7 +269,7 @@ export default function UploadScreen() {
                 color: colors.foreground,
               },
             ]}
-            placeholder="Describe your look..."
+            placeholder="Describe your look, inspiration, or mood..."
             placeholderTextColor={colors.mutedForeground}
             value={caption}
             onChangeText={setCaption}
@@ -199,39 +278,38 @@ export default function UploadScreen() {
           />
         </View>
 
+        {/* Hashtags */}
         <View style={styles.section}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Style</Text>
-          <View style={styles.styleWrap}>
-            {STYLES.map((s) => (
-              <StyleTag
-                key={s}
-                label={s}
-                selected={selectedStyle === s}
-                onPress={() => setSelectedStyle(s)}
-              />
-            ))}
+          <View style={styles.sectionHeader}>
+            <Ionicons name="at-outline" size={16} color={colors.primary} />
+            <Text style={[styles.label, { color: colors.foreground }]}>Hashtags</Text>
+            <Text style={[styles.tagCount, { color: colors.mutedForeground }]}>
+              {tags.length}/10
+            </Text>
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.label, { color: colors.foreground }]}>Tags</Text>
           <View
             style={[
-              styles.tagInput,
+              styles.tagInputRow,
               { backgroundColor: colors.secondary, borderColor: colors.border },
             ]}
           >
+            <Text style={[styles.hashPrefix, { color: colors.primary }]}>#</Text>
             <TextInput
               style={[styles.tagInputText, { color: colors.foreground, flex: 1 }]}
-              placeholder="Add a tag and press +"
+              placeholder="type a tag and press +"
               placeholderTextColor={colors.mutedForeground}
               value={tagInput}
               onChangeText={setTagInput}
               onSubmitEditing={addTag}
               returnKeyType="done"
+              autoCapitalize="none"
             />
-            <Pressable onPress={addTag}>
-              <Feather name="plus-circle" size={22} color={colors.primary} />
+            <Pressable onPress={addTag} disabled={!tagInput.trim()}>
+              <Ionicons
+                name="add-circle"
+                size={26}
+                color={tagInput.trim() ? colors.primary : colors.muted}
+              />
             </Pressable>
           </View>
           {tags.length > 0 && (
@@ -240,10 +318,10 @@ export default function UploadScreen() {
                 <Pressable
                   key={t}
                   onPress={() => removeTag(t)}
-                  style={[styles.tagPill, { backgroundColor: colors.tag }]}
+                  style={[styles.tagPill, { backgroundColor: colors.tag, borderColor: colors.border }]}
                 >
                   <Text style={[styles.tagPillText, { color: colors.tagText }]}>#{t}</Text>
-                  <Feather name="x" size={12} color={colors.tagText} />
+                  <Ionicons name="close" size={13} color={colors.tagText} />
                 </Pressable>
               ))}
             </View>
@@ -269,9 +347,11 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_700Bold",
   },
   postBtn: {
-    paddingHorizontal: 18,
-    paddingVertical: 9,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
     borderRadius: 100,
+    minWidth: 68,
+    alignItems: "center",
   },
   postBtnText: {
     fontSize: 15,
@@ -279,21 +359,21 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 18,
-    paddingTop: 18,
-    gap: 22,
+    paddingTop: 20,
+    gap: 24,
   },
+
+  // Photo picker
   imagePicker: {
     width: "100%",
     aspectRatio: 3 / 4,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
     overflow: "hidden",
   },
-  preview: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  preview: { ...StyleSheet.absoluteFillObject },
   removeImg: {
     position: "absolute",
     top: 14,
@@ -304,45 +384,105 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  pickerInner: {
+  changeBadge: {
+    position: "absolute",
+    bottom: 14,
+    right: 14,
+    flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 100,
+  },
+  changeBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontFamily: "Inter_500Medium",
+  },
+  pickerInner: { alignItems: "center", gap: 12 },
+  pickerIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
   pickerText: {
     fontSize: 16,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_600SemiBold",
   },
   pickerSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
-  section: { gap: 10 },
+
+  // Sections
+  section: { gap: 12 },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
   label: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
+    flex: 1,
   },
+  optional: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+  tagCount: {
+    fontSize: 12,
+    fontFamily: "Inter_400Regular",
+  },
+
+  // Topic grid
+  topicGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 9,
+  },
+  topicChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 100,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  topicChipText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+
+  // Caption
   captionInput: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     padding: 14,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    minHeight: 80,
+    minHeight: 90,
     textAlignVertical: "top",
+    lineHeight: 22,
   },
-  styleWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tagInput: {
+
+  // Tags
+  tagInputRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    gap: 8,
+    gap: 6,
+  },
+  hashPrefix: {
+    fontSize: 17,
+    fontFamily: "Inter_600SemiBold",
   },
   tagInputText: {
     fontSize: 15,
@@ -356,9 +496,10 @@ const styles = StyleSheet.create({
   tagPill: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 100,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 5,
   },
   tagPillText: {

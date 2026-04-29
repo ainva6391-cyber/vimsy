@@ -1,10 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useAuth, useUser } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  Animated,
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -17,8 +20,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import UserAvatar from "@/components/UserAvatar";
-import { useApp } from "@/contexts/AppContext";
+import { useApp, type Comment } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { likePost, unlikePost, addComment as apiAddComment, listComments } from "@/lib/apiClient";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -27,11 +31,28 @@ export default function PostDetailScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getPostById, toggleSave, boards, createBoard, addToBoard } = useApp();
+  const { getPostById, toggleSave, toggleLike, boards, createBoard, addToBoard, addComment, getComments, currentUser } = useApp();
+  const { getToken, isSignedIn } = useAuth();
+  const { user } = useUser();
 
   const post = getPostById(id ?? "");
   const [showBoardModal, setShowBoardModal] = useState(false);
   const [newBoardName, setNewBoardName] = useState("");
+  const [commentText, setCommentText] = useState("");
+  const [submittingComment, setSubmittingComment] = useState(false);
+
+  // Heart animation
+  const heartScale = useRef(new Animated.Value(1)).current;
+
+  // Local comments (from context + optimistic)
+  const localComments = post ? getComments(post.id) : [];
+
+  // Load additional comments from API on mount
+  useEffect(() => {
+    if (!post) return;
+    // Fire-and-forget: fetch DB comments (sample posts won't have any)
+    listComments(post.id).catch(() => {});
+  }, [post?.id]);
 
   if (!post) {
     return (
@@ -50,6 +71,34 @@ export default function PostDetailScreen() {
 
   const imgHeight = SCREEN_WIDTH / post.aspectRatio;
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  // ── Like ────────────────────────────────────────────────────────────────
+
+  async function handleLike() {
+    // Animate the heart
+    Animated.sequence([
+      Animated.spring(heartScale, { toValue: 1.35, useNativeDriver: false, speed: 40 }),
+      Animated.spring(heartScale, { toValue: 1, useNativeDriver: false, speed: 20 }),
+    ]).start();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // Optimistic local update
+    toggleLike(post.id);
+
+    // Persist to DB (fire-and-forget)
+    try {
+      const token = await getToken();
+      if (token) {
+        if (!post.likedByMe) {
+          await likePost(post.id, token);
+        } else {
+          await unlikePost(post.id, token);
+        }
+      }
+    } catch {}
+  }
+
+  // ── Save ─────────────────────────────────────────────────────────────────
 
   function handleQuickSave() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -78,9 +127,38 @@ export default function PostDetailScreen() {
     router.push(`/board/${boardId}`);
   }
 
+  // ── Comment ───────────────────────────────────────────────────────────────
+
+  async function handleComment() {
+    const text = commentText.trim();
+    if (!text) return;
+    setSubmittingComment(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    const commentPayload: Omit<Comment, "id" | "createdAt"> = {
+      postId: post.id,
+      userId: currentUser.id,
+      username: user?.username ?? currentUser.username,
+      userAvatar: user?.imageUrl ?? currentUser.avatar,
+      content: text,
+    };
+
+    // Optimistic: add to local state immediately
+    addComment(post.id, commentPayload);
+    setCommentText("");
+
+    // Persist to DB (fire-and-forget)
+    try {
+      const token = await getToken();
+      if (token) await apiAddComment(post.id, text, token);
+    } catch {}
+
+    setSubmittingComment(false);
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      {/* Navigation bar */}
+      {/* Nav bar */}
       <View
         style={[
           styles.navBar,
@@ -91,7 +169,6 @@ export default function PostDetailScreen() {
           <Ionicons name="arrow-back" size={22} color={colors.foreground} />
         </Pressable>
         <View style={styles.navActions}>
-          {/* Quick toggle save */}
           <Pressable onPress={handleQuickSave} hitSlop={10} style={styles.navBtn}>
             <Ionicons
               name={post.savedByMe ? "bookmark" : "bookmark-outline"}
@@ -99,91 +176,182 @@ export default function PostDetailScreen() {
               color={post.savedByMe ? colors.primary : colors.foreground}
             />
           </Pressable>
-          {/* Save to a specific board */}
           <Pressable onPress={handleOpenBoardModal} hitSlop={10} style={styles.navBtn}>
             <Ionicons name="albums-outline" size={22} color={colors.foreground} />
           </Pressable>
         </View>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={topPad + 56}
       >
-        <Image
-          source={post.imageUri}
-          style={{ width: SCREEN_WIDTH, height: imgHeight }}
-          contentFit="cover"
-          transition={300}
-        />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Post image */}
+          <Image
+            source={post.imageUri}
+            style={{ width: SCREEN_WIDTH, height: imgHeight }}
+            contentFit="cover"
+            transition={300}
+          />
 
-        <View style={styles.content}>
-          {/* Author + save count */}
-          <View style={styles.authorRow}>
-            <UserAvatar uri={post.userAvatar} size={42} />
-            <View style={styles.authorInfo}>
-              <Text style={[styles.username, { color: colors.foreground }]}>
-                @{post.username}
-              </Text>
-              <Text style={[styles.postedAt, { color: colors.mutedForeground }]}>
-                {new Date(post.createdAt).toLocaleDateString("en-US", {
-                  month: "long",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </Text>
+          <View style={styles.content}>
+            {/* Author row */}
+            <View style={styles.authorRow}>
+              <UserAvatar uri={post.userAvatar} size={42} />
+              <View style={styles.authorInfo}>
+                <Text style={[styles.username, { color: colors.foreground }]}>@{post.username}</Text>
+                <Text style={[styles.postedAt, { color: colors.mutedForeground }]}>
+                  {new Date(post.createdAt).toLocaleDateString("en-US", {
+                    month: "long", day: "numeric", year: "numeric",
+                  })}
+                </Text>
+              </View>
             </View>
-            <View style={[styles.savesChip, { backgroundColor: colors.tag }]}>
-              <Ionicons name="bookmark" size={14} color={colors.primary} />
-              <Text style={[styles.savesCount, { color: colors.tagText }]}>{post.saves}</Text>
+
+            {/* ── Action bar: like + save count ── */}
+            <View style={styles.actionBar}>
+              {/* Like button */}
+              <Pressable onPress={handleLike} style={styles.actionBtn}>
+                <Animated.View style={{ transform: [{ scale: heartScale }] }}>
+                  <Ionicons
+                    name={post.likedByMe ? "heart" : "heart-outline"}
+                    size={26}
+                    color={post.likedByMe ? "#e05a7b" : colors.foreground}
+                  />
+                </Animated.View>
+                <Text style={[styles.actionCount, { color: colors.foreground }]}>
+                  {post.likes.toLocaleString()}
+                </Text>
+              </Pressable>
+
+              {/* Comment count (read-only here, full list below) */}
+              <View style={styles.actionBtn}>
+                <Ionicons name="chatbubble-outline" size={24} color={colors.foreground} />
+                <Text style={[styles.actionCount, { color: colors.foreground }]}>
+                  {post.commentCount}
+                </Text>
+              </View>
+
+              <View style={styles.actionSpacer} />
+
+              {/* Save count chip */}
+              <View style={[styles.savesChip, { backgroundColor: colors.tag }]}>
+                <Ionicons name="bookmark" size={14} color={colors.primary} />
+                <Text style={[styles.savesCount, { color: colors.tagText }]}>{post.saves}</Text>
+              </View>
             </View>
-          </View>
 
-          {/* Caption */}
-          <Text style={[styles.caption, { color: colors.foreground }]}>{post.caption}</Text>
+            {/* Caption */}
+            {!!post.caption && (
+              <Text style={[styles.caption, { color: colors.foreground }]}>{post.caption}</Text>
+            )}
 
-          {/* Style — tappable topic chip */}
-          <View style={styles.styleRow}>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                router.push(`/topic/${encodeURIComponent(post.style)}`);
-              }}
-              style={({ pressed }) => [
-                styles.styleChip,
-                { backgroundColor: pressed ? colors.accent : colors.tag, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="pricetag-outline" size={13} color={colors.tagText} />
-              <Text style={[styles.styleChipText, { color: colors.tagText }]}>{post.style}</Text>
-              <Ionicons name="chevron-forward" size={13} color={colors.mutedForeground} />
-            </Pressable>
-          </View>
+            {/* Style chip → topic feed */}
+            <View style={styles.styleRow}>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push(`/topic/${encodeURIComponent(post.style)}`);
+                }}
+                style={({ pressed }) => [
+                  styles.styleChip,
+                  { backgroundColor: pressed ? colors.accent : colors.tag, borderColor: colors.border },
+                ]}
+              >
+                <Ionicons name="pricetag-outline" size={13} color={colors.tagText} />
+                <Text style={[styles.styleChipText, { color: colors.tagText }]}>{post.style}</Text>
+                <Ionicons name="chevron-forward" size={13} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
 
-          {/* Tags */}
-          {post.tags.length > 0 && (
-            <View style={styles.tagsRow}>
-              {post.tags.map((t) => (
-                <View key={t} style={[styles.tagChip, { backgroundColor: colors.tag }]}>
-                  <Text style={[styles.tagChipText, { color: colors.tagText }]}>#{t}</Text>
-                </View>
+            {/* Tags */}
+            {post.tags.length > 0 && (
+              <View style={styles.tagsRow}>
+                {post.tags.map((t) => (
+                  <View key={t} style={[styles.tagChip, { backgroundColor: colors.tag }]}>
+                    <Text style={[styles.tagChipText, { color: colors.tagText }]}>#{t}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* Board membership */}
+            {post.boardIds.length > 0 && (
+              <View style={[styles.inBoardsRow, { borderTopColor: colors.border }]}>
+                <Ionicons name="albums" size={15} color={colors.mutedForeground} />
+                <Text style={[styles.inBoardsText, { color: colors.mutedForeground }]}>
+                  Saved to {post.boardIds.length} board{post.boardIds.length !== 1 ? "s" : ""}
+                </Text>
+              </View>
+            )}
+
+            {/* ── Comments section ── */}
+            <View style={[styles.commentSection, { borderTopColor: colors.border }]}>
+              <Text style={[styles.commentSectionTitle, { color: colors.foreground }]}>
+                Comments {post.commentCount > 0 ? `(${post.commentCount})` : ""}
+              </Text>
+
+              {localComments.length === 0 && (
+                <Text style={[styles.noComments, { color: colors.mutedForeground }]}>
+                  No comments yet — be the first!
+                </Text>
+              )}
+
+              {localComments.map((c) => (
+                <CommentRow key={c.id} comment={c} colors={colors} />
               ))}
             </View>
-          )}
+          </View>
+        </ScrollView>
 
-          {/* Board membership list */}
-          {post.boardIds.length > 0 && (
-            <View style={[styles.inBoardsRow, { borderTopColor: colors.border }]}>
-              <Ionicons name="albums" size={15} color={colors.mutedForeground} />
-              <Text style={[styles.inBoardsText, { color: colors.mutedForeground }]}>
-                Saved to {post.boardIds.length} board{post.boardIds.length !== 1 ? "s" : ""}
-              </Text>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+        {/* ── Comment input ── */}
+        {isSignedIn && (
+          <View
+            style={[
+              styles.commentInput,
+              {
+                backgroundColor: colors.background,
+                borderTopColor: colors.border,
+                paddingBottom: Math.max(insets.bottom, 12),
+              },
+            ]}
+          >
+            <UserAvatar uri={user?.imageUrl ?? currentUser.avatar} size={34} />
+            <TextInput
+              style={[
+                styles.commentTextField,
+                { backgroundColor: colors.secondary, borderColor: colors.border, color: colors.foreground },
+              ]}
+              placeholder="Add a comment..."
+              placeholderTextColor={colors.mutedForeground}
+              value={commentText}
+              onChangeText={setCommentText}
+              returnKeyType="send"
+              onSubmitEditing={handleComment}
+              multiline
+            />
+            <Pressable
+              onPress={handleComment}
+              disabled={!commentText.trim() || submittingComment}
+              hitSlop={8}
+            >
+              <Ionicons
+                name="send"
+                size={22}
+                color={commentText.trim() ? colors.primary : colors.muted}
+              />
+            </Pressable>
+          </View>
+        )}
+      </KeyboardAvoidingView>
 
-      {/* Board save modal */}
+      {/* Board modal */}
       <Modal
         visible={showBoardModal}
         transparent
@@ -202,11 +370,7 @@ export default function PostDetailScreen() {
         >
           <View style={[styles.dragHandle, { backgroundColor: colors.border }]} />
           <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Save to Board</Text>
-
-          {/* Create new board inline */}
-          <View
-            style={[styles.newBoardRow, { backgroundColor: colors.secondary, borderColor: colors.border }]}
-          >
+          <View style={[styles.newBoardRow, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <TextInput
               style={[styles.newBoardInput, { color: colors.foreground, flex: 1 }]}
               placeholder="Create new board..."
@@ -231,8 +395,6 @@ export default function PostDetailScreen() {
               />
             </Pressable>
           </View>
-
-          {/* Existing boards */}
           {boards.length > 0 ? (
             <ScrollView style={{ maxHeight: 260 }} showsVerticalScrollIndicator={false}>
               {boards.map((b) => {
@@ -241,22 +403,15 @@ export default function PostDetailScreen() {
                   <Pressable
                     key={b.id}
                     onPress={() => !alreadyIn && handleSaveToBoard(b.id)}
-                    style={[
-                      styles.boardRow,
-                      { borderBottomColor: colors.border, opacity: alreadyIn ? 0.5 : 1 },
-                    ]}
+                    style={[styles.boardRow, { borderBottomColor: colors.border, opacity: alreadyIn ? 0.5 : 1 }]}
                   >
                     <Ionicons
                       name={alreadyIn ? "checkmark-circle" : "albums-outline"}
                       size={20}
                       color={alreadyIn ? colors.primary : colors.mutedForeground}
                     />
-                    <Text style={[styles.boardRowName, { color: colors.foreground, flex: 1 }]}>
-                      {b.name}
-                    </Text>
-                    <Text style={[styles.boardRowCount, { color: colors.mutedForeground }]}>
-                      {b.postCount}
-                    </Text>
+                    <Text style={[styles.boardRowName, { color: colors.foreground, flex: 1 }]}>{b.name}</Text>
+                    <Text style={[styles.boardRowCount, { color: colors.mutedForeground }]}>{b.postCount}</Text>
                   </Pressable>
                 );
               })}
@@ -266,7 +421,6 @@ export default function PostDetailScreen() {
               No boards yet — create one above
             </Text>
           )}
-
           <Pressable onPress={() => setShowBoardModal(false)} style={styles.cancelRow}>
             <Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text>
           </Pressable>
@@ -276,29 +430,35 @@ export default function PostDetailScreen() {
   );
 }
 
+// ── Comment row component ────────────────────────────────────────────────────
+function CommentRow({ comment, colors }: { comment: Comment; colors: ReturnType<typeof import("@/hooks/useColors").useColors> }) {
+  return (
+    <View style={styles.commentRow}>
+      <UserAvatar uri={comment.userAvatar} size={32} />
+      <View style={styles.commentBody}>
+        <View style={styles.commentMeta}>
+          <Text style={[styles.commentUsername, { color: colors.foreground }]}>
+            @{comment.username}
+          </Text>
+          <Text style={[styles.commentTime, { color: colors.mutedForeground }]}>
+            {new Date(comment.createdAt).toLocaleDateString("en-US", {
+              month: "short", day: "numeric",
+            })}
+          </Text>
+        </View>
+        <Text style={[styles.commentContent, { color: colors.foreground }]}>{comment.content}</Text>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  notFound: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 14,
-    padding: 30,
-  },
-  notFoundText: {
-    fontSize: 16,
-    fontFamily: "Inter_500Medium",
-  },
-  goBackBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 100,
-    marginTop: 8,
-  },
-  goBackText: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-  },
+  notFound: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, padding: 30 },
+  notFoundText: { fontSize: 16, fontFamily: "Inter_500Medium" },
+  goBackBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 100, marginTop: 8 },
+  goBackText: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+
   navBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -310,21 +470,28 @@ const styles = StyleSheet.create({
   navBtn: { padding: 7 },
   navActions: { flexDirection: "row", gap: 2 },
   content: { padding: 18, gap: 16 },
-  authorRow: {
+
+  authorRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  authorInfo: { flex: 1 },
+  username: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
+  postedAt: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 2 },
+
+  // Action bar
+  actionBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 18,
   },
-  authorInfo: { flex: 1 },
-  username: {
+  actionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+  },
+  actionCount: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
   },
-  postedAt: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-    marginTop: 2,
-  },
+  actionSpacer: { flex: 1 },
   savesChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -333,15 +500,9 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     gap: 5,
   },
-  savesCount: {
-    fontSize: 13,
-    fontFamily: "Inter_600SemiBold",
-  },
-  caption: {
-    fontSize: 16,
-    fontFamily: "Inter_400Regular",
-    lineHeight: 24,
-  },
+  savesCount: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+
+  caption: { fontSize: 16, fontFamily: "Inter_400Regular", lineHeight: 24 },
   styleRow: { flexDirection: "row" },
   styleChip: {
     flexDirection: "row",
@@ -353,24 +514,10 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  styleChipText: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
-  tagsRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tagChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-  },
-  tagChipText: {
-    fontSize: 13,
-    fontFamily: "Inter_500Medium",
-  },
+  styleChipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
+  tagsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  tagChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100 },
+  tagChipText: { fontSize: 13, fontFamily: "Inter_500Medium" },
   inBoardsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -378,10 +525,56 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  inBoardsText: {
+  inBoardsText: { fontSize: 13, fontFamily: "Inter_400Regular" },
+
+  // Comments
+  commentSection: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 16,
+    gap: 14,
+  },
+  commentSectionTitle: {
+    fontSize: 15,
+    fontFamily: "Inter_700Bold",
+  },
+  noComments: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
+    textAlign: "center",
+    paddingVertical: 12,
   },
+  commentRow: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  commentBody: { flex: 1, gap: 3 },
+  commentMeta: { flexDirection: "row", alignItems: "center", gap: 8 },
+  commentUsername: { fontSize: 13, fontFamily: "Inter_600SemiBold" },
+  commentTime: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  commentContent: { fontSize: 14, fontFamily: "Inter_400Regular", lineHeight: 20 },
+
+  // Comment input bar
+  commentInput: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+  },
+  commentTextField: {
+    flex: 1,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    fontSize: 14,
+    fontFamily: "Inter_400Regular",
+    maxHeight: 100,
+  },
+
+  // Board modal
   overlay: { flex: 1 },
   sheet: {
     position: "absolute",
@@ -394,18 +587,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     gap: 14,
   },
-  dragHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: "center",
-    marginBottom: 4,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontFamily: "Inter_700Bold",
-    textAlign: "center",
-  },
+  dragHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
+  sheetTitle: { fontSize: 18, fontFamily: "Inter_700Bold", textAlign: "center" },
   newBoardRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -416,18 +599,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     gap: 8,
   },
-  newBoardInput: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-    paddingVertical: 6,
-  },
-  createMiniBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  newBoardInput: { fontSize: 15, fontFamily: "Inter_400Regular", paddingVertical: 6 },
+  createMiniBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   boardRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -435,26 +608,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: 12,
   },
-  boardRowName: {
-    fontSize: 15,
-    fontFamily: "Inter_500Medium",
-  },
-  boardRowCount: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-  },
-  noBoards: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    paddingVertical: 8,
-  },
-  cancelRow: {
-    alignItems: "center",
-    paddingVertical: 4,
-  },
-  cancelText: {
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
+  boardRowName: { fontSize: 15, fontFamily: "Inter_500Medium" },
+  boardRowCount: { fontSize: 13, fontFamily: "Inter_400Regular" },
+  noBoards: { fontSize: 13, fontFamily: "Inter_400Regular", textAlign: "center", paddingVertical: 8 },
+  cancelRow: { alignItems: "center", paddingVertical: 4 },
+  cancelText: { fontSize: 15, fontFamily: "Inter_400Regular" },
 });

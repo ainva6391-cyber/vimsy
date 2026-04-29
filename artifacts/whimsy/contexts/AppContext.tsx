@@ -21,11 +21,24 @@ export interface Post {
   userAvatar: string;
   saves: number;
   savedByMe: boolean;
+  likes: number;
+  likedByMe: boolean;
+  commentCount: number;
   createdAt: string;
   boardIds: string[];
   width: number;
   height: number;
   aspectRatio: number;
+}
+
+export interface Comment {
+  id: string;
+  postId: string;
+  userId: string;
+  username: string;
+  userAvatar: string;
+  content: string;
+  createdAt: string;
 }
 
 export interface Board {
@@ -82,6 +95,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=47",
     saves: 234,
     savedByMe: false,
+    likes: 412,
+    likedByMe: false,
+    commentCount: 18,
     createdAt: "2026-04-20T10:00:00Z",
     boardIds: [],
     width: 3,
@@ -99,6 +115,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=12",
     saves: 892,
     savedByMe: false,
+    likes: 1203,
+    likedByMe: false,
+    commentCount: 47,
     createdAt: "2026-04-21T14:30:00Z",
     boardIds: [],
     width: 3,
@@ -116,6 +135,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=32",
     saves: 1456,
     savedByMe: true,
+    likes: 2871,
+    likedByMe: true,
+    commentCount: 93,
     createdAt: "2026-04-19T08:00:00Z",
     boardIds: [],
     width: 3,
@@ -133,6 +155,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=25",
     saves: 611,
     savedByMe: false,
+    likes: 987,
+    likedByMe: false,
+    commentCount: 34,
     createdAt: "2026-04-18T11:00:00Z",
     boardIds: [],
     width: 3,
@@ -150,6 +175,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=9",
     saves: 327,
     savedByMe: false,
+    likes: 504,
+    likedByMe: false,
+    commentCount: 21,
     createdAt: "2026-04-17T09:15:00Z",
     boardIds: [],
     width: 3,
@@ -167,6 +195,9 @@ const SAMPLE_POSTS: Post[] = [
     userAvatar: "https://i.pravatar.cc/150?img=47",
     saves: 788,
     savedByMe: true,
+    likes: 1342,
+    likedByMe: false,
+    commentCount: 56,
     createdAt: "2026-04-16T16:00:00Z",
     boardIds: [],
     width: 3,
@@ -194,7 +225,9 @@ interface AppContextType {
   savedPosts: Post[];
   myPosts: Post[];
   toggleSave: (postId: string) => void;
-  addPost: (post: Omit<Post, "id" | "saves" | "savedByMe" | "createdAt" | "boardIds">) => void;
+  toggleLike: (postId: string) => void;
+  addPost: (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">) => string;
+  addComment: (postId: string, comment: Omit<Comment, "id" | "createdAt">) => void;
   createBoard: (name: string, firstPostId?: string) => string;
   addToBoard: (postId: string, boardId: string) => void;
   removeFromBoard: (postId: string, boardId: string) => void;
@@ -203,6 +236,7 @@ interface AppContextType {
   getBoardById: (id: string) => Board | undefined;
   getBoardPosts: (boardId: string) => Post[];
   getFilteredPosts: (style?: string, query?: string) => Post[];
+  getComments: (postId: string) => Comment[];
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -210,36 +244,31 @@ const AppContext = createContext<AppContextType | null>(null);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [posts, setPosts] = useState<Post[]>(SAMPLE_POSTS);
   const [boards, setBoards] = useState<Board[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [currentUser] = useState<UserProfile>(CURRENT_USER);
 
-  // Keep a ref so callbacks always have the latest posts without stale closures
   const postsRef = useRef<Post[]>(SAMPLE_POSTS);
-  useEffect(() => {
-    postsRef.current = posts;
-  }, [posts]);
+  useEffect(() => { postsRef.current = posts; }, [posts]);
 
   const boardsRef = useRef<Board[]>([]);
-  useEffect(() => {
-    boardsRef.current = boards;
-  }, [boards]);
+  useEffect(() => { boardsRef.current = boards; }, [boards]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const commentsRef = useRef<Comment[]>([]);
+  useEffect(() => { commentsRef.current = comments; }, [comments]);
+
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     try {
-      const [savedPostsRaw, savedBoardsRaw] = await Promise.all([
+      const [savedPostsRaw, savedBoardsRaw, savedCommentsRaw] = await Promise.all([
         AsyncStorage.getItem("userPosts"),
         AsyncStorage.getItem("boards"),
+        AsyncStorage.getItem("comments"),
       ]);
-      if (savedPostsRaw) {
-        const userPosts = JSON.parse(savedPostsRaw) as Post[];
-        setPosts([...SAMPLE_POSTS, ...userPosts]);
-      }
-      if (savedBoardsRaw) {
-        setBoards(JSON.parse(savedBoardsRaw));
-      }
+      const userPosts = savedPostsRaw ? (JSON.parse(savedPostsRaw) as Post[]) : [];
+      if (userPosts.length) setPosts([...SAMPLE_POSTS, ...userPosts]);
+      if (savedBoardsRaw) setBoards(JSON.parse(savedBoardsRaw));
+      if (savedCommentsRaw) setComments(JSON.parse(savedCommentsRaw));
     } catch {}
   }
 
@@ -252,29 +281,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem("userPosts", JSON.stringify(userOnly)).catch(() => {});
   }, []);
 
+  const persistComments = useCallback((all: Comment[]) => {
+    AsyncStorage.setItem("comments", JSON.stringify(all)).catch(() => {});
+  }, []);
+
+  // ── Save / unsave ─────────────────────────────────────────────────────────
   const toggleSave = useCallback((postId: string) => {
     setPosts((prev) => {
       const updated = prev.map((p) => {
         if (p.id !== postId) return p;
         const nowSaved = !p.savedByMe;
-        return {
-          ...p,
-          savedByMe: nowSaved,
-          saves: nowSaved ? p.saves + 1 : Math.max(0, p.saves - 1),
-        };
+        return { ...p, savedByMe: nowSaved, saves: nowSaved ? p.saves + 1 : Math.max(0, p.saves - 1) };
       });
       persistUserPosts(updated);
       return updated;
     });
   }, [persistUserPosts]);
 
+  // ── Like / unlike ─────────────────────────────────────────────────────────
+  const toggleLike = useCallback((postId: string) => {
+    setPosts((prev) => {
+      const updated = prev.map((p) => {
+        if (p.id !== postId) return p;
+        const nowLiked = !p.likedByMe;
+        return { ...p, likedByMe: nowLiked, likes: nowLiked ? p.likes + 1 : Math.max(0, p.likes - 1) };
+      });
+      persistUserPosts(updated);
+      return updated;
+    });
+  }, [persistUserPosts]);
+
+  // ── Add post ───────────────────────────────────────────────────────────────
   const addPost = useCallback(
-    (post: Omit<Post, "id" | "saves" | "savedByMe" | "createdAt" | "boardIds">) => {
+    (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">): string => {
+      const newId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       const newPost: Post = {
         ...post,
-        id: `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: newId,
         saves: 0,
         savedByMe: false,
+        likes: 0,
+        likedByMe: false,
+        commentCount: 0,
         createdAt: new Date().toISOString(),
         boardIds: [],
       };
@@ -283,14 +331,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         persistUserPosts(updated);
         return updated;
       });
+      return newId;
     },
     [persistUserPosts]
   );
 
-  // Returns the new boardId so callers can navigate to it
+  // ── Add comment ───────────────────────────────────────────────────────────
+  const addComment = useCallback((postId: string, comment: Omit<Comment, "id" | "createdAt">) => {
+    const newComment: Comment = {
+      ...comment,
+      id: `c_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      createdAt: new Date().toISOString(),
+    };
+    setComments((prev) => {
+      const updated = [newComment, ...prev];
+      persistComments(updated);
+      return updated;
+    });
+    // Increment comment count on the post
+    setPosts((prev) => {
+      const updated = prev.map((p) =>
+        p.id === postId ? { ...p, commentCount: p.commentCount + 1 } : p
+      );
+      persistUserPosts(updated);
+      return updated;
+    });
+  }, [persistComments, persistUserPosts]);
+
+  // ── Get comments for a post ───────────────────────────────────────────────
+  const getComments = useCallback((postId: string): Comment[] => {
+    return commentsRef.current.filter((c) => c.postId === postId);
+  }, []);
+
+  // ── Boards ────────────────────────────────────────────────────────────────
   const createBoard = useCallback((name: string, firstPostId?: string): string => {
     const boardId = `b_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    // Resolve cover from current posts ref (avoids stale closure)
     const coverPost = firstPostId ? postsRef.current.find((p) => p.id === firstPostId) : null;
     const newBoard: Board = {
       id: boardId,
@@ -300,20 +375,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       postIds: firstPostId ? [firstPostId] : [],
       createdAt: new Date().toISOString(),
     };
-    setBoards((prev) => {
-      const updated = [...prev, newBoard];
-      persistBoards(updated);
-      return updated;
-    });
+    setBoards((prev) => { const u = [...prev, newBoard]; persistBoards(u); return u; });
     if (firstPostId) {
       setPosts((prev) => {
-        const updated = prev.map((p) =>
+        const u = prev.map((p) =>
           p.id === firstPostId && !p.boardIds.includes(boardId)
             ? { ...p, boardIds: [...p.boardIds, boardId], savedByMe: true, saves: p.saves + 1 }
             : p
         );
-        persistUserPosts(updated);
-        return updated;
+        persistUserPosts(u);
+        return u;
       });
     }
     return boardId;
@@ -324,29 +395,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const board = prev.find((b) => b.id === boardId);
       if (!board || board.postIds.includes(postId)) return prev;
       const coverPost = postsRef.current.find((p) => p.id === postId);
-      const updated = prev.map((b) =>
+      const u = prev.map((b) =>
         b.id === boardId
-          ? {
-              ...b,
-              postIds: [...b.postIds, postId],
-              postCount: b.postCount + 1,
-              coverUri: b.coverUri ?? coverPost?.imageUri ?? null,
-            }
+          ? { ...b, postIds: [...b.postIds, postId], postCount: b.postCount + 1, coverUri: b.coverUri ?? coverPost?.imageUri ?? null }
           : b
       );
-      persistBoards(updated);
-      return updated;
+      persistBoards(u);
+      return u;
     });
     setPosts((prev) => {
       const post = prev.find((p) => p.id === postId);
       if (!post || post.boardIds.includes(boardId)) return prev;
-      const updated = prev.map((p) =>
-        p.id === postId
-          ? { ...p, boardIds: [...p.boardIds, boardId], savedByMe: true, saves: p.saves + 1 }
-          : p
+      const u = prev.map((p) =>
+        p.id === postId ? { ...p, boardIds: [...p.boardIds, boardId], savedByMe: true, saves: p.saves + 1 } : p
       );
-      persistUserPosts(updated);
-      return updated;
+      persistUserPosts(u);
+      return u;
     });
   }, [persistBoards, persistUserPosts]);
 
@@ -355,64 +419,44 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const board = prev.find((b) => b.id === boardId);
       if (!board) return prev;
       const newPostIds = board.postIds.filter((id) => id !== postId);
-      // Update cover to next available post if this was the cover
       const newCover =
         board.coverUri === postsRef.current.find((p) => p.id === postId)?.imageUri
           ? (postsRef.current.find((p) => newPostIds.includes(p.id))?.imageUri ?? null)
           : board.coverUri;
-      const updated = prev.map((b) =>
-        b.id === boardId
-          ? { ...b, postIds: newPostIds, postCount: newPostIds.length, coverUri: newCover }
-          : b
+      const u = prev.map((b) =>
+        b.id === boardId ? { ...b, postIds: newPostIds, postCount: newPostIds.length, coverUri: newCover } : b
       );
-      persistBoards(updated);
-      return updated;
+      persistBoards(u);
+      return u;
     });
     setPosts((prev) => {
-      const updated = prev.map((p) => {
+      const u = prev.map((p) => {
         if (p.id !== postId) return p;
         const newBoardIds = p.boardIds.filter((b) => b !== boardId);
-        // Only mark unsaved if removed from all boards AND it was only board-saved
-        const isStillSaved = newBoardIds.length > 0 || p.savedByMe;
-        return { ...p, boardIds: newBoardIds, savedByMe: isStillSaved };
+        return { ...p, boardIds: newBoardIds, savedByMe: newBoardIds.length > 0 || p.savedByMe };
       });
-      persistUserPosts(updated);
-      return updated;
+      persistUserPosts(u);
+      return u;
     });
   }, [persistBoards, persistUserPosts]);
 
   const deleteBoard = useCallback((boardId: string) => {
     const board = boardsRef.current.find((b) => b.id === boardId);
     if (!board) return;
-    // Remove boardId from all posts in the board
     if (board.postIds.length > 0) {
       setPosts((prev) => {
-        const updated = prev.map((p) =>
-          board.postIds.includes(p.id)
-            ? { ...p, boardIds: p.boardIds.filter((b) => b !== boardId) }
-            : p
+        const u = prev.map((p) =>
+          board.postIds.includes(p.id) ? { ...p, boardIds: p.boardIds.filter((b) => b !== boardId) } : p
         );
-        persistUserPosts(updated);
-        return updated;
+        persistUserPosts(u);
+        return u;
       });
     }
-    setBoards((prev) => {
-      const updated = prev.filter((b) => b.id !== boardId);
-      persistBoards(updated);
-      return updated;
-    });
+    setBoards((prev) => { const u = prev.filter((b) => b.id !== boardId); persistBoards(u); return u; });
   }, [persistBoards, persistUserPosts]);
 
-  const getPostById = useCallback(
-    (id: string) => postsRef.current.find((p) => p.id === id),
-    []
-  );
-
-  const getBoardById = useCallback(
-    (id: string) => boardsRef.current.find((b) => b.id === id),
-    []
-  );
-
+  const getPostById = useCallback((id: string) => postsRef.current.find((p) => p.id === id), []);
+  const getBoardById = useCallback((id: string) => boardsRef.current.find((b) => b.id === id), []);
   const getBoardPosts = useCallback((boardId: string): Post[] => {
     const board = boardsRef.current.find((b) => b.id === boardId);
     if (!board) return [];
@@ -435,7 +479,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         return true;
       });
     },
-    // Re-memoize when posts actually change
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [posts]
   );
@@ -453,7 +496,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         savedPosts,
         myPosts,
         toggleSave,
+        toggleLike,
         addPost,
+        addComment,
         createBoard,
         addToBoard,
         removeFromBoard,
@@ -462,6 +507,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         getBoardById,
         getBoardPosts,
         getFilteredPosts,
+        getComments,
       }}
     >
       {children}
