@@ -67,8 +67,9 @@ router.get("/posts", async (req, res) => {
 });
 
 router.get("/posts/:id", async (req, res) => {
+  const id = String(req.params.id);
   const post = await db.query.postsTable.findFirst({
-    where: eq(postsTable.id, req.params.id),
+    where: eq(postsTable.id, id),
   });
 
   if (!post) return res.status(404).json({ error: "Post not found" });
@@ -77,13 +78,14 @@ router.get("/posts/:id", async (req, res) => {
 
 router.delete("/posts/:id", requireAuth, async (req, res) => {
   const supabaseUserId = req.supabaseUserId!;
+  const id = String(req.params.id);
 
   const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const [deleted] = await db
     .delete(postsTable)
-    .where(and(eq(postsTable.id, req.params.id), eq(postsTable.userId, authUser.id)))
+    .where(and(eq(postsTable.id, id), eq(postsTable.userId, authUser.id)))
     .returning();
 
   if (!deleted) return res.status(404).json({ error: "Post not found or not yours" });

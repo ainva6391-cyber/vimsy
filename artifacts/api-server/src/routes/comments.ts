@@ -26,6 +26,7 @@ const commentBodySchema = z.object({
 
 router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
   const supabaseUserId = req.supabaseUserId!;
+  const postId = String(req.params.postId);
 
   const parse = commentBodySchema.safeParse(req.body);
   if (!parse.success) {
@@ -36,26 +37,27 @@ router.post("/posts/:postId/comments", requireAuth, async (req, res) => {
   if (!authUser) return res.status(403).json({ error: "User not synced. Call /api/auth/sync first." });
 
   const post = await db.query.postsTable.findFirst({
-    where: eq(postsTable.id, req.params.postId),
+    where: eq(postsTable.id, postId),
   });
   if (!post) return res.status(404).json({ error: "Post not found" });
 
   const [comment] = await db
     .insert(commentsTable)
-    .values({ postId: req.params.postId, userId: authUser.id, content: parse.data.content })
+    .values({ postId, userId: authUser.id, content: parse.data.content })
     .returning();
 
   await db
     .update(postsTable)
     .set({ commentCount: sql`${postsTable.commentCount} + 1` })
-    .where(eq(postsTable.id, req.params.postId));
+    .where(eq(postsTable.id, postId));
 
   return res.status(201).json(comment);
 });
 
 router.get("/posts/:postId/comments", async (req, res) => {
+  const postId = String(req.params.postId);
   const comments = await db.query.commentsTable.findMany({
-    where: eq(commentsTable.postId, req.params.postId),
+    where: eq(commentsTable.postId, postId),
     orderBy: [desc(commentsTable.createdAt)],
     limit: 200,
   });
@@ -65,13 +67,14 @@ router.get("/posts/:postId/comments", async (req, res) => {
 
 router.delete("/comments/:id", requireAuth, async (req, res) => {
   const supabaseUserId = req.supabaseUserId!;
+  const id = String(req.params.id);
 
   const authUser = await resolveAuthUserId(supabaseUserId);
   if (!authUser) return res.status(403).json({ error: "User not found" });
 
   const [deleted] = await db
     .delete(commentsTable)
-    .where(and(eq(commentsTable.id, req.params.id), eq(commentsTable.userId, authUser.id)))
+    .where(and(eq(commentsTable.id, id), eq(commentsTable.userId, authUser.id)))
     .returning();
 
   if (!deleted) return res.status(404).json({ error: "Comment not found or not yours" });

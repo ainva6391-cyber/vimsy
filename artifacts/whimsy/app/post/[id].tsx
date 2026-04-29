@@ -50,7 +50,7 @@ export default function PostDetailScreen() {
   const { session, user } = useAuth();
   const isSignedIn = !!user;
 
-  const post = getPostById(id ?? "");
+  const maybePost = getPostById(id ?? "");
 
   const [showComments, setShowComments] = useState(false);
   const [showBoardModal, setShowBoardModal] = useState(false);
@@ -63,9 +63,9 @@ export default function PostDetailScreen() {
   const heartScale = useRef(new Animated.Value(1)).current;
   const scrollRef = useRef<ScrollView>(null);
 
-  const localComments = post ? getComments(post.id) : [];
+  const localComments = maybePost ? getComments(maybePost.id) : [];
 
-  if (!post) {
+  if (!maybePost) {
     return (
       <View style={[styles.notFound, { backgroundColor: colors.background }]}>
         <Ionicons name="image-outline" size={44} color={colors.mutedForeground} />
@@ -83,6 +83,9 @@ export default function PostDetailScreen() {
       </View>
     );
   }
+
+  // Narrowed to Post (not Post | undefined) so closures below are type-safe
+  const post = maybePost;
 
   const imgHeight = SCREEN_WIDTH / post.aspectRatio;
   const topPad = insets.top;

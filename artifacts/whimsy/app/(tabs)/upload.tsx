@@ -87,27 +87,23 @@ export default function UploadScreen() {
     setSubmitting(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    // 1. Upload image to Supabase Storage → get a permanent public URL
+    // 1. Upload image to Supabase Storage → user_post_images/private/photos/
+    setUploadStatus("uploading");
     let finalImageUri = imageUri;
     try {
-      setUploadStatus("uploading");
       const { publicUrl } = await uploadPostImage(imageUri);
       finalImageUri = publicUrl;
     } catch (err) {
       if (err instanceof UploadValidationError) {
-        // File type or size invalid — block the post
+        Alert.alert("Can't upload photo", (err as Error).message);
         setSubmitting(false);
         setUploadStatus("idle");
-        Alert.alert("Can't upload photo", (err as UploadValidationError).message);
         return;
       } else if (err instanceof UploadStorageError) {
-        // Storage error — warn but gracefully fall back to local URI
-        console.warn("[Upload] Supabase storage error, using local URI:", err);
-        Alert.alert(
-          "Photo not saved to cloud",
-          "Your look will still be posted, but the image may not persist. Check your connection and try again.",
-          [{ text: "Post anyway" }],
-        );
+        Alert.alert("Upload failed", (err as Error).message);
+        setSubmitting(false);
+        setUploadStatus("idle");
+        return;
       } else {
         console.warn("[Upload] Unexpected upload error, using local URI:", err);
       }
