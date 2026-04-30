@@ -1,8 +1,9 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -79,6 +80,18 @@ function SignedInProfile() {
   // Local preview — updates immediately after a successful upload so the
   // user doesn't have to wait for a full session refresh to see their new photo.
   const [localAvatarUri, setLocalAvatarUri] = useState<string | null>(null);
+  // Persisted avatar URL loaded from AsyncStorage — survives app restarts even
+  // if the Supabase session cache doesn't carry the updated user metadata.
+  const [storedAvatarUri, setStoredAvatarUri] = useState<string | null>(null);
+
+  const avatarStorageKey = user ? `avatar_${user.id}` : null;
+
+  useEffect(() => {
+    if (!avatarStorageKey) return;
+    AsyncStorage.getItem(avatarStorageKey).then((url) => {
+      if (url) setStoredAvatarUri(url);
+    }).catch(() => {});
+  }, [avatarStorageKey]);
 
   function confirmSignOut() {
     Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -136,7 +149,14 @@ function SignedInProfile() {
       // 3. Re-sync local session so user.user_metadata reflects the new avatar_url
       await refreshUser();
 
-      // 4. Swap local preview for the stable CDN URL
+      // 4. Persist the URL locally so it survives app restarts regardless of
+      //    whether the Supabase session cache carries the updated metadata.
+      if (avatarStorageKey) {
+        await AsyncStorage.setItem(avatarStorageKey, publicUrl).catch(() => {});
+      }
+      setStoredAvatarUri(publicUrl);
+
+      // 5. Swap local preview for the stable CDN URL
       setLocalAvatarUri(publicUrl);
     } catch (err) {
       // On failure, revert the optimistic preview
@@ -165,7 +185,7 @@ function SignedInProfile() {
     user?.email?.split("@")[0] ||
     "vimsy.user";
   // Prefer the optimistic local URI; fall back to the persisted URL from metadata
-  const avatarUri = localAvatarUri ?? (meta.avatar_url as string) ?? null;
+  const avatarUri = localAvatarUri ?? (meta.avatar_url as string) ?? storedAvatarUri ?? null;
 
   const header = (
     <View style={[styles.profileHeader, { paddingTop: topPad + 10 }]}>
