@@ -159,11 +159,11 @@ function SignedInProfile() {
     (meta.name as string) ||
     (meta.username as string) ||
     user?.email?.split("@")[0] ||
-    "Whimsy User";
+    "Vimsy User";
   const username =
     (meta.username as string) ||
     user?.email?.split("@")[0] ||
-    "whimsy.user";
+    "vimsy.user";
   // Prefer the optimistic local URI; fall back to the persisted URL from metadata
   const avatarUri = localAvatarUri ?? (meta.avatar_url as string) ?? null;
 

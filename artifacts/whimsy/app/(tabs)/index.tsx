@@ -76,7 +76,7 @@ export default function DiscoverScreen() {
           },
         ]}
       >
-        <Text style={[styles.logo, { color: colors.primary }]}>Whimsy</Text>
+        <Text style={[styles.logo, { color: colors.primary }]}>Vimsy</Text>
         <Ionicons name="sparkles-outline" size={22} color={colors.primary} />
       </View>
 

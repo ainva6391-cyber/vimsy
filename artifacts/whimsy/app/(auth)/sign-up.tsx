@@ -108,12 +108,12 @@ export default function SignUpScreen() {
         </Pressable>
 
         <View style={styles.logoRow}>
-          <Text style={[styles.logoText, { color: colors.primary }]}>Whimsy</Text>
+          <Text style={[styles.logoText, { color: colors.primary }]}>Vimsy</Text>
         </View>
 
         <Text style={[styles.heading, { color: colors.foreground }]}>Create your account</Text>
         <Text style={[styles.subheading, { color: colors.mutedForeground }]}>
-          Join Whimsy and start curating your style
+          Join Vimsy and start curating your style
         </Text>
 
         {error && (

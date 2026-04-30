@@ -65,7 +65,7 @@ export default function SignInScreen() {
         </Pressable>
 
         <View style={styles.logoRow}>
-          <Text style={[styles.logoText, { color: colors.primary }]}>Whimsy</Text>
+          <Text style={[styles.logoText, { color: colors.primary }]}>Vimsy</Text>
         </View>
 
         <Text style={[styles.heading, { color: colors.foreground }]}>Welcome back</Text>
