@@ -57,13 +57,29 @@ router.post("/posts", requireAuth, async (req, res) => {
 router.get("/posts", async (req, res) => {
   const style = typeof req.query.style === "string" ? req.query.style : undefined;
 
-  const posts = await db.query.postsTable.findMany({
-    where: style ? eq(postsTable.style, style) : undefined,
-    orderBy: [desc(postsTable.createdAt)],
-    limit: 100,
-  });
+  const rows = await db
+    .select({
+      id:             postsTable.id,
+      imageUrl:       postsTable.imageUrl,
+      caption:        postsTable.caption,
+      style:          postsTable.style,
+      tags:           postsTable.tags,
+      likeCount:      postsTable.likeCount,
+      saveCount:      postsTable.saveCount,
+      commentCount:   postsTable.commentCount,
+      createdAt:      postsTable.createdAt,
+      supabaseUserId: authUsersTable.supabaseUserId,
+      username:       usersTable.username,
+      avatarUrl:      usersTable.avatarUrl,
+    })
+    .from(postsTable)
+    .leftJoin(authUsersTable, eq(authUsersTable.id, postsTable.userId))
+    .leftJoin(usersTable, eq(usersTable.userId, postsTable.userId))
+    .where(style ? eq(postsTable.style, style) : undefined)
+    .orderBy(desc(postsTable.createdAt))
+    .limit(100);
 
-  return res.status(200).json(posts);
+  return res.status(200).json(rows);
 });
 
 router.get("/posts/:id", async (req, res) => {

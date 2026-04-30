@@ -10,6 +10,7 @@ import React, {
   useState,
 } from "react";
 
+import { listPosts, type ApiPost } from "@/lib/apiClient";
 import { supabase } from "@/lib/supabase";
 
 // imageUri/coverUri: supports both URI strings and require() module references
@@ -130,6 +131,29 @@ const SAMPLE_POSTS: Post[] = [
   },
 ];
 
+function dbPostToAppPost(p: ApiPost): Post {
+  return {
+    id:           p.id,
+    imageUri:     p.imageUrl,
+    caption:      p.caption ?? "",
+    tags:         p.tags ?? [],
+    style:        p.style ?? "Minimal",
+    userId:       p.supabaseUserId ?? p.id,
+    username:     p.username ?? "user",
+    userAvatar:   p.avatarUrl ?? "",
+    saves:        p.saveCount,
+    savedByMe:    false,
+    likes:        p.likeCount,
+    likedByMe:    false,
+    commentCount: p.commentCount,
+    createdAt:    typeof p.createdAt === "string" ? p.createdAt : new Date(p.createdAt).toISOString(),
+    boardIds:     [],
+    width:        3,
+    height:       4,
+    aspectRatio:  3 / 4,
+  };
+}
+
 function userProfileFromSupabase(authUser: User | null): UserProfile {
   if (!authUser) {
     return { id: "guest", username: "guest", displayName: "Guest", avatar: "", bio: "", followers: 0, following: 0, postCount: 0 };
@@ -157,7 +181,7 @@ interface AppContextType {
   myPosts: Post[];
   toggleSave: (postId: string) => void;
   toggleLike: (postId: string) => void;
-  addPost: (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">) => string;
+  addPost: (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">, id?: string) => string;
   removePost: (postId: string) => void;
   addComment: (postId: string, comment: Omit<Comment, "id" | "createdAt">) => void;
   createBoard: (name: string, firstPostId?: string) => string;
@@ -203,17 +227,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
+    // Load boards + comments from AsyncStorage (still local)
     try {
-      const [savedPostsRaw, savedBoardsRaw, savedCommentsRaw] = await Promise.all([
-        AsyncStorage.getItem("userPosts"),
+      const [savedBoardsRaw, savedCommentsRaw] = await Promise.all([
         AsyncStorage.getItem("boards"),
         AsyncStorage.getItem("comments"),
       ]);
-      const userPosts = savedPostsRaw ? (JSON.parse(savedPostsRaw) as Post[]) : [];
-      if (userPosts.length) setPosts([...SAMPLE_POSTS, ...userPosts]);
       if (savedBoardsRaw) setBoards(JSON.parse(savedBoardsRaw));
       if (savedCommentsRaw) setComments(JSON.parse(savedCommentsRaw));
     } catch {}
+
+    // Load posts from DB (authoritative source); fall back to AsyncStorage if unavailable
+    try {
+      const apiPosts = await listPosts();
+      const dbPosts = apiPosts.map(dbPostToAppPost);
+      const dbIds = new Set(dbPosts.map((p) => p.id));
+      const samples = SAMPLE_POSTS.filter((p) => !dbIds.has(p.id));
+      setPosts([...samples, ...dbPosts]);
+    } catch {
+      // API unavailable — fall back to local cache
+      try {
+        const savedPostsRaw = await AsyncStorage.getItem("userPosts");
+        const userPosts = savedPostsRaw ? (JSON.parse(savedPostsRaw) as Post[]) : [];
+        if (userPosts.length) setPosts([...SAMPLE_POSTS, ...userPosts]);
+      } catch {}
+    }
   }
 
   const persistBoards = useCallback((updated: Board[]) => {
@@ -257,8 +295,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // ── Add post ───────────────────────────────────────────────────────────────
   const addPost = useCallback(
-    (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">): string => {
-      const newId = `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    (post: Omit<Post, "id" | "saves" | "savedByMe" | "likes" | "likedByMe" | "commentCount" | "createdAt" | "boardIds">, id?: string): string => {
+      const newId = id ?? `p_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       const newPost: Post = {
         ...post,
         id: newId,

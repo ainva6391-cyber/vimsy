@@ -109,27 +109,14 @@ export default function UploadScreen() {
       }
     }
 
-    // 2. Add to local state immediately with the public URL
+    // 2. Save to DB and get the real post ID
     setUploadStatus("saving");
     const meta = user?.user_metadata ?? {};
-    addPost({
-      imageUri: finalImageUri,
-      caption: caption.trim(),
-      tags,
-      style: selectedTopic,
-      userId: currentUser.id,
-      username: (meta.username as string) ?? currentUser.username,
-      userAvatar: (meta.avatar_url as string) ?? currentUser.avatar,
-      width: imageSize.width,
-      height: imageSize.height,
-      aspectRatio: imageSize.width / imageSize.height,
-    });
-
-    // 3. Persist to DB with the Supabase URL (fire-and-forget)
+    let realPostId: string | undefined;
     try {
       const token = session?.access_token;
       if (token) {
-        await createPost(
+        const dbPost = await createPost(
           {
             imageUrl: finalImageUri,
             caption: caption.trim() || undefined,
@@ -138,10 +125,28 @@ export default function UploadScreen() {
           },
           token,
         );
+        realPostId = dbPost.id;
       }
     } catch (err) {
       console.warn("[Upload] DB persist failed:", err);
     }
+
+    // 3. Add to local state using the real DB ID (so the post survives app restarts)
+    addPost(
+      {
+        imageUri: finalImageUri,
+        caption: caption.trim(),
+        tags,
+        style: selectedTopic,
+        userId: currentUser.id,
+        username: (meta.username as string) ?? currentUser.username,
+        userAvatar: (meta.avatar_url as string) ?? currentUser.avatar,
+        width: imageSize.width,
+        height: imageSize.height,
+        aspectRatio: imageSize.width / imageSize.height,
+      },
+      realPostId,
+    );
 
     setSubmitting(false);
     setUploadStatus("idle");

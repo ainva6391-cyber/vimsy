@@ -45,7 +45,6 @@ export function syncUser(
 
 export interface ApiPost {
   id: string;
-  userId: string;
   imageUrl: string;
   caption: string | null;
   style: string | null;
@@ -54,6 +53,14 @@ export interface ApiPost {
   saveCount: number;
   commentCount: number;
   createdAt: string;
+  supabaseUserId: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
+export function listPosts(style?: string) {
+  const q = style ? `?style=${encodeURIComponent(style)}` : "";
+  return apiFetch<ApiPost[]>(`/posts${q}`, "GET");
 }
 
 export function createPost(
