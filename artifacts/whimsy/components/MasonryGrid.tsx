@@ -76,41 +76,42 @@ export default function MasonryGrid({
   function renderPost(post: Post) {
     const imgHeight = COLUMN_WIDTH / post.aspectRatio;
     return (
-      <Pressable
-        key={post.id}
-        style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-        onPress={() => router.push(`/post/${post.id}`)}
-      >
-        <Image
-          source={post.imageUri}
-          style={{ width: COLUMN_WIDTH, height: imgHeight }}
-          contentFit="cover"
-          transition={300}
-        />
+      <View key={post.id} style={styles.cardWrapper}>
+        {/* Card — tappable for navigation */}
+        <Pressable
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push(`/post/${post.id}`)}
+        >
+          <Image
+            source={post.imageUri}
+            style={{ width: COLUMN_WIDTH, height: imgHeight }}
+            contentFit="cover"
+            transition={300}
+          />
+          <View style={styles.cardFooter}>
+            <Text style={[styles.caption, { color: colors.foreground }]} numberOfLines={2}>
+              {post.caption}
+            </Text>
+            <View style={styles.cardMeta}>
+              <Text style={[styles.username, { color: colors.mutedForeground }]}>
+                @{post.username}
+              </Text>
+              <SaveButton post={post} compact />
+            </View>
+          </View>
+        </Pressable>
 
-        {/* Three-dot menu — only rendered when onDelete is provided */}
+        {/* Three-dot menu — sibling of card Pressable so touches aren't swallowed */}
         {onDelete && (
           <Pressable
             style={[styles.menuBtn, { backgroundColor: colors.background + "CC" }]}
             onPress={() => handleMenuPress(post)}
-            hitSlop={8}
+            hitSlop={10}
           >
             <Ionicons name="ellipsis-horizontal" size={14} color={colors.foreground} />
           </Pressable>
         )}
-
-        <View style={styles.cardFooter}>
-          <Text style={[styles.caption, { color: colors.foreground }]} numberOfLines={2}>
-            {post.caption}
-          </Text>
-          <View style={styles.cardMeta}>
-            <Text style={[styles.username, { color: colors.mutedForeground }]}>
-              @{post.username}
-            </Text>
-            <SaveButton post={post} compact />
-          </View>
-        </View>
-      </Pressable>
+      </View>
     );
   }
 
@@ -156,6 +157,9 @@ const styles = StyleSheet.create({
   column: {
     flex: 1,
     gap: GAP,
+  },
+  cardWrapper: {
+    position: "relative",
   },
   card: {
     borderRadius: 14,
