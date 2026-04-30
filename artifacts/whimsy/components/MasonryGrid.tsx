@@ -50,27 +50,18 @@ export default function MasonryGrid({
   }, [posts]);
 
   function handleMenuPress(post: Post) {
-    Alert.alert(post.caption ? `"${post.caption}"` : "This look", undefined, [
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: () => {
-          Alert.alert(
-            "Delete look?",
-            "This will permanently remove the post. This cannot be undone.",
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Delete",
-                style: "destructive",
-                onPress: () => onDelete?.(post.id),
-              },
-            ],
-          );
+    Alert.alert(
+      "Delete this look?",
+      "This will permanently remove the post and cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => onDelete?.(post.id),
         },
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
+      ],
+    );
   }
 
   function renderPost(post: Post) {

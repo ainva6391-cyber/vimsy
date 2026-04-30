@@ -2,11 +2,12 @@
  * Supabase client + Storage helpers for Whimsy.
  *
  * Buckets (both public-read):
- *   • user_post_images    — outfit/post photos
- *   • user_profile_images — profile avatars
+ *   • user_post_images    — private/photos/${fileName}
+ *   • user_profile_images — profile/${fileName}
  *
- * Both buckets have one INSERT policy:
+ * each bucket have one INSERT policy:
  *   (storage.foldername(name))[1] = 'private'
+ *   (storage.foldername(name))[1] = 'profile'
  *
  * Upload strategy: direct REST API calls via fetch.
  * The Supabase JS SDK routes uploads for public buckets to the read-only
@@ -75,11 +76,6 @@ function mimeFromExt(ext: string): string {
   return map[ext] ?? "image/jpeg";
 }
 
-function uniqueFilename(ext = "jpg") {
-  const ts = Date.now();
-  const rand = Math.random().toString(36).substring(2, 9);
-  return `${ts}_${rand}.${ext}`;
-}
 
 function validateExt(uri: string): string {
   const ext = extFromUri(uri);
@@ -230,15 +226,22 @@ export interface UploadResult {
 /**
  * Upload an outfit/post image to user_post_images bucket.
  *
- * POST  /storage/v1/object/user_post_images/private/photos/{file}
- * GET   /storage/v1/object/sign/user_post_images/private/photos/{file}?token=...
+ * POST  /storage/v1/object/user_post_images/private/photos/${fileName}
+ * GET   /storage/v1/object/sign/user_post_images/private/photos/${fileName}?token=...
  */
 export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   const ext = validateExt(localUri);
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
 
-  const path = `private/photos/${uniqueFilename(ext)}`;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) throw new Error("User not authenticated");
+    // add uniqueness (timestamp or random)
+  const fileName = `${user.id}-${Date.now()}.${ext}`;
+  const path = `private/photos/${fileName}`;
   const contentType = mimeFromExt(ext);
 
   await storageUpload("user_post_images", path, buffer, contentType, false);
@@ -247,22 +250,33 @@ export async function uploadPostImage(localUri: string): Promise<UploadResult> {
   return { publicUrl: url, path };
 }
 
+
 /**
  * Upload a profile avatar to user_profile_images bucket.
  *
- * POST  /storage/v1/object/user_profile_images/private/avatar.{ext}
- * GET   /storage/v1/object/sign/user_profile_images/private/avatar.{ext}?token=...
+ * POST  /storage/v1/object/user_profile_images/profile/${fileName}
+ * GET   /storage/v1/object/sign/user_profile_images/profile/${fileNmae}?token=...
  */
 export async function uploadProfileImage(localUri: string): Promise<UploadResult> {
   const ext = validateExt(localUri);
   const buffer = await uriToArrayBuffer(localUri);
   validateSize(buffer.byteLength);
 
-  const path = `private/avatar.${ext}`;
+  const { 
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) throw new Error("User not authenticated");
+  
+  const fileName = `${user.id}-${Date.now()}.${ext}`;
+  const path = `profile/${fileName}`;
+  
   const contentType = mimeFromExt(ext);
 
   await storageUpload("user_profile_images", path, buffer, contentType, true);
 
   const url = await signedStorageUrl("user_profile_images", path);
+
   return { publicUrl: url, path };
-}
+  }
+
