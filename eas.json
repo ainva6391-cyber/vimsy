@@ -1,4 +1,5 @@
 { 
+ "installCommand": "pnpm install"
   "build": {
     "preview": {
       "node": "18.18.0",
