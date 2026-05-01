@@ -2,7 +2,6 @@
   "name": "workspace",
   "version": "0.0.0",
   "packageManager": "pnpm@8.15.0",
-  "preinstall": "",
   "license": "MIT",
   "scripts": {
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
