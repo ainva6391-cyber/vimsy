@@ -1,6 +1,6 @@
 { 
-"profile":{
   "build": {
+    "profile" {
     "preview": {
       "node": "18.18.0",
       "pnpm": "8.15.0"
